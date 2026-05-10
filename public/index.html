@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Codex 提供商同步</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>Codex 提供商同步</h1>
+          <p id="status">加载中...</p>
+        </div>
+        <button id="syncButton" type="button">同步</button>
+      </header>
+
+      <section class="layout">
+        <form id="providerForm" class="panel">
+          <h2>添加或更新</h2>
+          <label>
+            名称
+            <input name="name" autocomplete="off" required>
+          </label>
+          <label>
+            Base URL
+            <input name="baseUrl" type="url" required>
+          </label>
+          <label>
+            API Key
+            <input name="apiKey" type="password" autocomplete="off">
+          </label>
+          <label>
+            模型
+            <input name="model" autocomplete="off">
+          </label>
+          <div class="actions">
+            <button type="submit">保存</button>
+            <button id="clearButton" type="button">清空</button>
+          </div>
+        </form>
+
+        <section class="panel">
+          <h2>提供商</h2>
+          <div id="providers" class="providers"></div>
+        </section>
+      </section>
+
+      <pre id="message" class="message" hidden></pre>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

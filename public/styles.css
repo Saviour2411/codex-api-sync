@@ -1,0 +1,166 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1f2937;
+  background: #f6f7f9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.shell {
+  width: min(1120px, calc(100vw - 32px));
+  margin: 28px auto;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+h2 {
+  font-size: 16px;
+  margin-bottom: 16px;
+}
+
+#status {
+  margin-top: 6px;
+  color: #5b6472;
+  font-size: 14px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 18px;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d9dee7;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+label {
+  display: block;
+  color: #394150;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+input {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 11px;
+  border: 1px solid #cbd3df;
+  border-radius: 6px;
+  color: #111827;
+  background: #ffffff;
+}
+
+button {
+  border: 1px solid #1f6feb;
+  background: #1f6feb;
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 9px 13px;
+  cursor: pointer;
+}
+
+button.secondary {
+  border-color: #cbd3df;
+  color: #273244;
+  background: #ffffff;
+}
+
+button.danger {
+  border-color: #c2410c;
+  background: #c2410c;
+}
+
+.actions,
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.providers {
+  display: grid;
+  gap: 10px;
+}
+
+.provider {
+  border: 1px solid #dde3ec;
+  border-radius: 8px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.provider.active {
+  border-color: #1f6feb;
+  background: #f3f8ff;
+}
+
+.provider-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.provider-name {
+  font-weight: 700;
+}
+
+.provider-url,
+.provider-meta {
+  color: #5b6472;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.message {
+  margin-top: 18px;
+  border-radius: 8px;
+  padding: 12px;
+  background: #101828;
+  color: #e5e7eb;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 780px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "codex-api-sync",
+  "version": "0.1.0",
+  "description": "用于切换 Codex Responses API 提供商的本地 Web 和 CLI 工具。",
+  "type": "module",
+  "bin": {
+    "codex-api-sync": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc && tsc -p tsconfig.test.json",
+    "test": "node --test dist-test/test/*.test.js",
+    "check": "npm run build && npm test"
+  },
+  "files": [
+    "dist",
+    "public",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "^5.8.0"
+  }
+}
