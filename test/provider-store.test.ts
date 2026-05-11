@@ -68,6 +68,49 @@ test("切换提供商时只改全局 provider 字段，不改 auth.json", async 
   assert.deepEqual(auth, { OPENAI_API_KEY: "original" });
 });
 
+test("写入顶层字段时不会生成重复 model 或 model_providermodel 脏字段", async () => {
+  const home = await tempCodexHome();
+  await fs.writeFile(configPath(home), [
+    'model = "old"',
+    'model = "duplicate"',
+    'model_providermodel = "dirty"',
+    '[projects."/tmp/example"]',
+    'trust_level = "trusted"',
+    "",
+  ].join("\n"), "utf8");
+
+  await addProvider(home, {
+    name: "Any",
+    baseUrl: "https://any.example/v1",
+    apiKey: "sk-any",
+  });
+  await switchProvider(home, "Any", { sync: false, model: "gpt-5.5" });
+
+  const config = await fs.readFile(configPath(home), "utf8");
+  assert.equal((config.match(/^model = /gm) ?? []).length, 1);
+  assert.equal((config.match(/^model_provider = /gm) ?? []).length, 1);
+  assert.doesNotMatch(config, /model_providermodel/);
+  assert.match(config, /^model = "gpt-5\.5"$/m);
+  assert.match(config, /^model_provider = "any"$/m);
+});
+
+test("文件末尾无换行时插入顶层字段不会和 model 粘连", async () => {
+  const home = await tempCodexHome();
+  await fs.writeFile(configPath(home), 'model = "old"', "utf8");
+
+  await addProvider(home, {
+    name: "Any",
+    baseUrl: "https://any.example/v1",
+    apiKey: "sk-any",
+  });
+  await switchProvider(home, "Any", { sync: false });
+
+  const config = await fs.readFile(configPath(home), "utf8");
+  assert.doesNotMatch(config, /model_providermodel/);
+  assert.match(config, /^model = "old"$/m);
+  assert.match(config, /^model_provider = "any"$/m);
+});
+
 test("切换提供商默认同步 session_meta model_provider", async () => {
   const home = await tempCodexHome();
   const sessionDir = path.join(home, "sessions", "2026", "05", "10");

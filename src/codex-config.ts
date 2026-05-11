@@ -35,10 +35,6 @@ function splitLines(text: string): string[] {
   return text.match(/[^\n]*\n|[^\n]+/g) ?? [];
 }
 
-function lineEnding(line: string): string {
-  return line.endsWith("\r\n") ? "\r\n" : line.endsWith("\n") ? "\n" : "";
-}
-
 function parseTomlString(value: string): string | undefined {
   const trimmed = value.trim();
   const match = /^"((?:[^"\\]|\\.)*)"/.exec(trimmed);
@@ -167,10 +163,30 @@ function findNextTableLine(lines: string[], start: number): number | undefined {
   return undefined;
 }
 
-function setTopLevelString(text: string, key: string, value: string): string {
+function isTopLevelKeyLine(line: string, key: string): boolean {
+  return new RegExp(`^\\s*${key}\\s*=`).test(line);
+}
+
+function isDirtyTopLevelLine(line: string): boolean {
+  return /^\s*model_providermodel\s*=/.test(line);
+}
+
+function normalizeLineEndings(lines: string[]): string[] {
+  return lines.map((line) => {
+    if (line.endsWith("\n")) {
+      return line;
+    }
+
+    return `${line}\n`;
+  });
+}
+
+function setTopLevelLine(text: string, key: string, lineValue: string): string {
   const lines = splitLines(text);
-  const replacement = `${key} = ${tomlString(value)}\n`;
+  const replacement = `${key} = ${lineValue}\n`;
   let firstTable = lines.length;
+  let replaced = false;
+  const result: string[] = [];
 
   for (let i = 0; i < lines.length; i += 1) {
     if (/^\s*\[/.test(lines[i])) {
@@ -178,57 +194,41 @@ function setTopLevelString(text: string, key: string, value: string): string {
       break;
     }
 
-    if (new RegExp(`^\\s*${key}\\s*=`).test(lines[i])) {
-      const ending = lineEnding(lines[i]) || "\n";
-      lines[i] = `${key} = ${tomlString(value)}${ending}`;
-      return lines.join("");
+    if (isDirtyTopLevelLine(lines[i])) {
+      continue;
     }
+
+    if (isTopLevelKeyLine(lines[i], key)) {
+      if (!replaced) {
+        result.push(replacement);
+        replaced = true;
+      }
+      continue;
+    }
+
+    result.push(lines[i]);
   }
 
+  if (replaced) {
+    return [...normalizeLineEndings(result), ...lines.slice(firstTable)].join("");
+  }
+
+  const normalizedTopLevel = normalizeLineEndings(result);
   if (firstTable === 0) {
-    lines.unshift(replacement);
+    return [replacement, ...lines].join("");
   } else if (firstTable < lines.length) {
-    lines.splice(firstTable, 0, replacement);
-  } else {
-    if (lines.length > 0 && !lines[lines.length - 1].endsWith("\n")) {
-      lines[lines.length - 1] += "\n";
-    }
-    lines.push(replacement);
+    return [...normalizedTopLevel, replacement, ...lines.slice(firstTable)].join("");
   }
 
-  return lines.join("");
+  return [...normalizedTopLevel, replacement].join("");
+}
+
+function setTopLevelString(text: string, key: string, value: string): string {
+  return setTopLevelLine(text, key, tomlString(value));
 }
 
 function setTopLevelBoolean(text: string, key: string, value: boolean): string {
-  const lines = splitLines(text);
-  const replacement = `${key} = ${value ? "true" : "false"}\n`;
-  let firstTable = lines.length;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    if (/^\s*\[/.test(lines[i])) {
-      firstTable = i;
-      break;
-    }
-
-    if (new RegExp(`^\\s*${key}\\s*=`).test(lines[i])) {
-      const ending = lineEnding(lines[i]) || "\n";
-      lines[i] = `${key} = ${value ? "true" : "false"}${ending}`;
-      return lines.join("");
-    }
-  }
-
-  if (firstTable === 0) {
-    lines.unshift(replacement);
-  } else if (firstTable < lines.length) {
-    lines.splice(firstTable, 0, replacement);
-  } else {
-    if (lines.length > 0 && !lines[lines.length - 1].endsWith("\n")) {
-      lines[lines.length - 1] += "\n";
-    }
-    lines.push(replacement);
-  }
-
-  return lines.join("");
+  return setTopLevelLine(text, key, value ? "true" : "false");
 }
 
 function removeTopLevelKey(text: string, key: string): string {
@@ -241,7 +241,7 @@ function removeTopLevelKey(text: string, key: string): string {
       inTable = true;
     }
 
-    if (!inTable && new RegExp(`^\\s*${key}\\s*=`).test(line)) {
+    if (!inTable && (isTopLevelKeyLine(line, key) || isDirtyTopLevelLine(line))) {
       continue;
     }
 
