@@ -48,4 +48,4 @@ codex-api-sync sync
 - `state_5.sqlite` 的 `threads.model_provider`，以及可用时的 `threads.cwd`
 - `.codex-global-state.json` 和 `.codex-global-state.json.bak` 中的桌面版 workspace roots 缓存
 
-SQLite 同步依赖 Node.js 内置 `node:sqlite`。如果当前 Node.js 版本不支持，工具会保留 JSONL 同步并输出警告；建议用 Node.js 24 或更高版本运行同步，以便桌面版历史会话索引也被更新。
+SQLite 同步会优先使用 Node.js 内置 `node:sqlite`；在 Node 20 等没有内置 SQLite 的环境下，会自动使用 `node-sqlite3-wasm` 后备实现，不需要系统安装 `sqlite3` 命令或原生编译工具。

@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { addProvider, doctor, listProviders, removeProvider, switchDefaultProvider, switchProvider, updateProvider } from "../src/provider-store.js";
 import { authPath, configPath } from "../src/platform.js";
+import { openSqliteDatabase } from "../src/sqlite-adapter.js";
 
 async function tempCodexHome(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-api-sync-"));
@@ -187,6 +188,35 @@ test("同步会话时只改 rollout 第一行 session_meta", async () => {
   const lines = (await fs.readFile(sessionFile, "utf8")).trim().split("\n");
   assert.match(lines[0], /"model_provider":"any"/);
   assert.match(lines[1], /"model_provider":"old"/);
+});
+
+test("Node 20 可通过 WASM fallback 同步 state_5.sqlite", async () => {
+  const home = await tempCodexHome();
+  const dbPath = path.join(home, "state_5.sqlite");
+  const db = await openSqliteDatabase(dbPath);
+  assert.ok(db);
+  if (Number(process.versions.node.split(".")[0]) < 22) {
+    assert.equal(db.backend, "node-sqlite3-wasm");
+  }
+  db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT, cwd TEXT)");
+  db.run("INSERT INTO threads (id, model_provider, cwd) VALUES (?, ?, ?)", ["thread", "old", "/tmp/example"]);
+  db.close();
+
+  await addProvider(home, {
+    name: "Any",
+    baseUrl: "https://any.example/v1",
+    apiKey: "sk-any",
+  });
+
+  const result = await switchProvider(home, "Any");
+  assert.equal(result.sync?.sqlitePresent, true);
+  assert.equal(result.sync?.sqliteRowsUpdated, 1);
+
+  const verifyDb = await openSqliteDatabase(dbPath, { readOnly: true });
+  assert.ok(verifyDb);
+  const rows = verifyDb.all("SELECT model_provider FROM threads WHERE id = ?", ["thread"]);
+  verifyDb.close();
+  assert.deepEqual(rows, [{ model_provider: "any" }]);
 });
 
 test("删除最后一个自定义提供商时恢复官方默认配置路径", async () => {

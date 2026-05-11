@@ -2,20 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathExists } from "./fs-utils.js";
 import { readCodexConfig } from "./codex-config.js";
+import { openSqliteDatabase, type SqliteConnection } from "./sqlite-adapter.js";
 import type { SyncResult } from "./types.js";
-
-type SqliteDatabase = {
-  exec: (sql: string) => void;
-  prepare: (sql: string) => {
-    run?: (...values: unknown[]) => { changes?: number | bigint };
-    all?: (...values: unknown[]) => Array<Record<string, unknown>>;
-  };
-  close: () => void;
-};
-
-type SqliteModule = {
-  DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => SqliteDatabase;
-};
 
 type CwdStat = {
   cwd: string;
@@ -100,32 +88,8 @@ function syncJsonlContent(content: string, providerId: string, fromProviderId?: 
   };
 }
 
-function getBuiltinModule(moduleName: string): unknown {
-  return (process as unknown as { getBuiltinModule?: (name: string) => unknown }).getBuiltinModule?.(moduleName);
-}
-
-async function loadSqlite(warnings: string[]): Promise<SqliteModule | undefined> {
-  const builtin = getBuiltinModule("node:sqlite");
-  if (builtin && typeof builtin === "object" && "DatabaseSync" in builtin) {
-    return builtin as SqliteModule;
-  }
-
-  try {
-    const dynamicImport = new Function("moduleName", "return import(moduleName)") as (moduleName: string) => Promise<unknown>;
-    return await dynamicImport("node:sqlite") as SqliteModule;
-  } catch (error) {
-    const code = (error as { code?: unknown }).code;
-    if (code === "ERR_UNKNOWN_BUILTIN_MODULE" || code === "ERR_MODULE_NOT_FOUND") {
-      warnings.push("当前 Node.js 不支持 node:sqlite，已跳过 state_5.sqlite 同步。建议使用 Node.js 24 或更高版本运行同步。");
-      return undefined;
-    }
-
-    throw error;
-  }
-}
-
-function tableHasColumn(db: SqliteDatabase, tableName: string, columnName: string): boolean {
-  const rows = db.prepare(`PRAGMA table_info("${tableName.replaceAll("\"", "\"\"")}")`).all?.() ?? [];
+function tableHasColumn(db: SqliteConnection, tableName: string, columnName: string): boolean {
+  const rows = db.all(`PRAGMA table_info("${tableName.replaceAll("\"", "\"\"")}")`);
   return rows.some((row) => row.name === columnName);
 }
 
@@ -237,27 +201,31 @@ function copyResolvedObjectKeys(input: unknown, cwdStats: CwdStat[]): unknown {
   return result;
 }
 
-async function readThreadCwdStats(codexHome: string, sqlite: SqliteModule, warnings: string[]): Promise<CwdStat[]> {
+async function readThreadCwdStats(codexHome: string, warnings: string[]): Promise<CwdStat[]> {
   const dbPath = path.join(codexHome, "state_5.sqlite");
   if (!(await pathExists(dbPath))) {
     return [];
   }
 
-  let db: SqliteDatabase | undefined;
+  let db: SqliteConnection | undefined;
   try {
-    db = new sqlite.DatabaseSync(dbPath, { readOnly: true });
+    db = await openSqliteDatabase(dbPath, { readOnly: true });
+    if (!db) {
+      warnings.push("未能加载 SQLite 后端，已跳过 workspace roots 修复。");
+      return [];
+    }
     if (!tableHasColumn(db, "threads", "cwd")) {
       return [];
     }
 
     const updatedAtExpression = tableHasColumn(db, "threads", "updated_at_ms") ? "COALESCE(MAX(updated_at_ms), 0)" : "0";
-    const rows = db.prepare(`
+    const rows = db.all(`
       SELECT cwd, COUNT(*) AS count, ${updatedAtExpression} AS updated_at_ms
       FROM threads
       WHERE cwd IS NOT NULL AND cwd <> ''
       GROUP BY cwd
       ORDER BY count DESC, updated_at_ms DESC, cwd
-    `).all?.() ?? [];
+    `);
 
     return rows
       .filter((row) => typeof row.cwd === "string" && row.cwd)
@@ -279,7 +247,6 @@ async function readThreadCwdStats(codexHome: string, sqlite: SqliteModule, warni
 async function updateSqliteProvider(
   codexHome: string,
   providerId: string,
-  sqlite: SqliteModule,
   warnings: string[],
   options?: { fromProviderId?: string; threadCwdById?: Map<string, string> }
 ): Promise<{ present: boolean; rowsUpdated: number }> {
@@ -289,10 +256,14 @@ async function updateSqliteProvider(
     return { present: false, rowsUpdated: 0 };
   }
 
-  let db: SqliteDatabase | undefined;
+  let db: SqliteConnection | undefined;
   let transactionOpen = false;
   try {
-    db = new sqlite.DatabaseSync(dbPath);
+    db = await openSqliteDatabase(dbPath);
+    if (!db) {
+      warnings.push("未能加载 SQLite 后端，已跳过 state_5.sqlite 同步。");
+      return { present: true, rowsUpdated: 0 };
+    }
     if (!tableHasColumn(db, "threads", "model_provider")) {
       warnings.push("state_5.sqlite 的 threads 表没有 model_provider 字段，已跳过 SQLite provider 同步。");
       return { present: true, rowsUpdated: 0 };
@@ -301,32 +272,31 @@ async function updateSqliteProvider(
     db.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
     const result = options?.fromProviderId
-      ? db.prepare(`
+      ? db.run(`
           UPDATE threads
           SET model_provider = ?
           WHERE model_provider = ?
-        `).run?.(providerId, options.fromProviderId)
-      : db.prepare(`
+        `, [providerId, options.fromProviderId])
+      : db.run(`
           UPDATE threads
           SET model_provider = ?
           WHERE COALESCE(model_provider, '') <> ?
-        `).run?.(providerId, providerId);
+        `, [providerId, providerId]);
     let cwdRowsUpdated = 0;
     if (tableHasColumn(db, "threads", "cwd") && options?.threadCwdById?.size) {
-      const cwdStmt = db.prepare(`
-        UPDATE threads
-        SET cwd = ?
-        WHERE id = ? AND COALESCE(cwd, '') <> ?
-      `);
       for (const [threadId, cwd] of options.threadCwdById) {
         const desktopCwd = toDesktopWorkspacePath(cwd);
-        cwdRowsUpdated += Number(cwdStmt.run?.(desktopCwd, threadId, desktopCwd).changes ?? 0);
+        cwdRowsUpdated += db.run(`
+          UPDATE threads
+          SET cwd = ?
+          WHERE id = ? AND COALESCE(cwd, '') <> ?
+        `, [desktopCwd, threadId, desktopCwd]).changes;
       }
     }
     db.exec("COMMIT");
     transactionOpen = false;
 
-    return { present: true, rowsUpdated: Number(result?.changes ?? 0) + cwdRowsUpdated };
+    return { present: true, rowsUpdated: result.changes + cwdRowsUpdated };
   } catch (error) {
     if (transactionOpen) {
       try {
@@ -428,8 +398,6 @@ export async function syncSessions(codexHome: string, providerId?: string, optio
 
   const sessionsDir = path.join(codexHome, "sessions");
   const archivedDir = path.join(codexHome, "archived_sessions");
-  const stateDb = path.join(codexHome, "state_5.sqlite");
-  const globalState = path.join(codexHome, ".codex-global-state.json");
 
   const sessionFiles = [
     ...(await collectJsonlFiles(sessionsDir)),
@@ -461,30 +429,20 @@ export async function syncSessions(codexHome: string, providerId?: string, optio
   let sqlitePresent = false;
   let globalStateUpdated = false;
   if (targetProviderId) {
-    const sqlite = await loadSqlite(warnings);
-    if (sqlite) {
-      const cwdStats = await readThreadCwdStats(codexHome, sqlite, warnings);
-      const sqliteResult = await updateSqliteProvider(codexHome, targetProviderId, sqlite, warnings, {
-        fromProviderId: options?.fromProviderId,
-        threadCwdById,
-      });
-      sqliteRowsUpdated = sqliteResult.rowsUpdated;
-      sqlitePresent = sqliteResult.present;
-      for (const [threadId, cwd] of threadCwdById) {
-        const normalizedCwd = normalizeComparablePath(cwd);
-        if (normalizedCwd && !cwdStats.some((stat) => stat.normalizedCwd === normalizedCwd)) {
-          cwdStats.push({ cwd, normalizedCwd, count: 1, updatedAtMs: 0 });
-        }
-      }
-      globalStateUpdated = await syncGlobalState(codexHome, cwdStats, warnings);
-    } else {
-      if (!(await pathExists(stateDb))) {
-        warnings.push("未找到 state_5.sqlite，已跳过 SQLite 会话索引同步。");
-      }
-      if (!(await pathExists(globalState))) {
-        warnings.push("未找到 .codex-global-state.json，已跳过项目路径缓存同步。");
+    const cwdStats = await readThreadCwdStats(codexHome, warnings);
+    const sqliteResult = await updateSqliteProvider(codexHome, targetProviderId, warnings, {
+      fromProviderId: options?.fromProviderId,
+      threadCwdById,
+    });
+    sqliteRowsUpdated = sqliteResult.rowsUpdated;
+    sqlitePresent = sqliteResult.present;
+    for (const [threadId, cwd] of threadCwdById) {
+      const normalizedCwd = normalizeComparablePath(cwd);
+      if (normalizedCwd && !cwdStats.some((stat) => stat.normalizedCwd === normalizedCwd)) {
+        cwdStats.push({ cwd, normalizedCwd, count: 1, updatedAtMs: 0 });
       }
     }
+    globalStateUpdated = await syncGlobalState(codexHome, cwdStats, warnings);
   }
 
   return { changedFiles, sqliteRowsUpdated, sqlitePresent, globalStateUpdated, warnings };
