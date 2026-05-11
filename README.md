@@ -39,3 +39,13 @@ codex-api-sync sync
 删除最后一个自定义提供商时，工具会删除顶层 `preferred_auth_method`、`requires_openai_auth` 和 `model_provider`，让 Codex 回到官方默认 provider 路径。
 也可以用 `switch-default` 或 Web 页面里的“默认 OpenAI”按钮手动切回默认 provider，而不删除任何自定义提供商。
 删除任意提供商时，工具会先把历史会话中引用该提供商的 `model_provider` 改为 `openai`，避免 Codex 打开历史会话时报 provider 不存在。
+
+## 会话同步
+
+切换 provider 时默认会同步：
+
+- `sessions` 和 `archived_sessions` 下 rollout JSONL 第一行 `session_meta.payload.model_provider`
+- `state_5.sqlite` 的 `threads.model_provider`，以及可用时的 `threads.cwd`
+- `.codex-global-state.json` 和 `.codex-global-state.json.bak` 中的桌面版 workspace roots 缓存
+
+SQLite 同步依赖 Node.js 内置 `node:sqlite`。如果当前 Node.js 版本不支持，工具会保留 JSONL 同步并输出警告；建议用 Node.js 24 或更高版本运行同步，以便桌面版历史会话索引也被更新。

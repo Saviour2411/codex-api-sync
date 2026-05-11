@@ -167,7 +167,11 @@ export async function removeProvider(codexHome: string, name: string, options?: 
     throw new Error("仍有其它自定义提供商时，不能删除当前激活提供商。请先切换。");
   }
 
-  const sync = options?.sync === false ? undefined : await syncSessions(codexHome, "openai", { fromProviderId: id });
+  const sync = options?.sync === false
+    ? undefined
+    : restoredDefault
+      ? await syncSessions(codexHome, "openai")
+      : await syncSessions(codexHome, "openai", { fromProviderId: id });
   await removeProviderConfig(codexHome, id, { restoreDefault: restoredDefault });
 
   return { restoredDefault, sync };

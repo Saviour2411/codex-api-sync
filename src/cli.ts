@@ -187,7 +187,7 @@ async function main(): Promise<void> {
 
     case "sync": {
       const result = await syncSessions(codexHome);
-      console.log(`会话同步完成。变更文件数：${result.changedFiles.length}。`);
+      console.log(`会话同步完成。变更文件数：${result.changedFiles.length}，SQLite 更新行数：${result.sqliteRowsUpdated}，项目缓存：${result.globalStateUpdated ? "已更新" : "未变更"}。`);
       for (const warning of result.warnings) {
         console.warn(`警告：${warning}`);
       }

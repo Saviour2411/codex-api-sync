@@ -166,13 +166,41 @@ test("切换提供商默认同步 session_meta model_provider", async () => {
   await fs.access(`${sessionFile}.bak`);
 });
 
+test("同步会话时只改 rollout 第一行 session_meta", async () => {
+  const home = await tempCodexHome();
+  const sessionDir = path.join(home, "sessions", "2026", "05", "10");
+  const sessionFile = path.join(sessionDir, "rollout.jsonl");
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(sessionFile, [
+    JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "thread", model_provider: "old" } }),
+    JSON.stringify({ timestamp: "later", type: "event_msg", payload: { model_provider: "old" } }),
+    "",
+  ].join("\n"), "utf8");
+
+  await addProvider(home, {
+    name: "Any",
+    baseUrl: "https://any.example/v1",
+    apiKey: "sk-any",
+  });
+
+  await switchProvider(home, "Any");
+  const lines = (await fs.readFile(sessionFile, "utf8")).trim().split("\n");
+  assert.match(lines[0], /"model_provider":"any"/);
+  assert.match(lines[1], /"model_provider":"old"/);
+});
+
 test("删除最后一个自定义提供商时恢复官方默认配置路径", async () => {
   const home = await tempCodexHome();
   const sessionDir = path.join(home, "sessions", "2026", "05", "12");
   const sessionFile = path.join(sessionDir, "rollout.jsonl");
+  const oldProviderFile = path.join(sessionDir, "old-provider.jsonl");
   await fs.mkdir(sessionDir, { recursive: true });
   await fs.writeFile(sessionFile, [
     JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "thread", model_provider: "any" } }),
+    "",
+  ].join("\n"), "utf8");
+  await fs.writeFile(oldProviderFile, [
+    JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "old-thread", model_provider: "old-provider" } }),
     "",
   ].join("\n"), "utf8");
 
@@ -185,7 +213,7 @@ test("删除最后一个自定义提供商时恢复官方默认配置路径", as
 
   const result = await removeProvider(home, "Any");
   assert.equal(result.restoredDefault, true);
-  assert.equal(result.sync?.changedFiles.length, 1);
+  assert.equal(result.sync?.changedFiles.length, 2);
   assert.deepEqual(await listProviders(home), []);
 
   const config = await fs.readFile(configPath(home), "utf8");
@@ -200,6 +228,7 @@ test("删除最后一个自定义提供商时恢复官方默认配置路径", as
 
   const synced = await fs.readFile(sessionFile, "utf8");
   assert.match(synced, /"model_provider":"openai"/);
+  assert.match(await fs.readFile(oldProviderFile, "utf8"), /"model_provider":"openai"/);
 });
 
 test("删除非最后一个提供商时也会清理该 provider 的历史引用", async () => {

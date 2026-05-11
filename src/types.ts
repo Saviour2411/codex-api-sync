@@ -26,6 +26,9 @@ export type ProviderUpdate = {
 
 export type SyncResult = {
   changedFiles: string[];
+  sqliteRowsUpdated: number;
+  sqlitePresent: boolean;
+  globalStateUpdated: boolean;
   warnings: string[];
 };
 
