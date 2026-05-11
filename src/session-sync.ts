@@ -3,7 +3,7 @@ import path from "node:path";
 import { pathExists } from "./fs-utils.js";
 import { readCodexConfig } from "./codex-config.js";
 import { openSqliteDatabase, type SqliteConnection } from "./sqlite-adapter.js";
-import type { SyncResult } from "./types.js";
+import type { AutoRepairResult, ProviderCounts, SessionSyncStatus, SyncResult } from "./types.js";
 
 type CwdStat = {
   cwd: string;
@@ -53,6 +53,10 @@ function parseSessionMetaLine(line: string): { item: Record<string, unknown>; pa
   return undefined;
 }
 
+function incrementCount(counts: ProviderCounts, providerId: string): void {
+  counts[providerId] = (counts[providerId] ?? 0) + 1;
+}
+
 function splitFirstLine(content: string): { firstLine: string; ending: string; rest: string } {
   const newlineIndex = content.indexOf("\n");
   if (newlineIndex === -1) {
@@ -86,6 +90,17 @@ function syncJsonlContent(content: string, providerId: string, fromProviderId?: 
     threadId,
     cwd,
   };
+}
+
+function readJsonlProvider(content: string): string | undefined {
+  const { firstLine } = splitFirstLine(content);
+  const parsed = parseSessionMetaLine(firstLine);
+  if (!parsed) {
+    return undefined;
+  }
+
+  const provider = parsed.payload.model_provider;
+  return typeof provider === "string" && provider ? provider : "(missing)";
 }
 
 function tableHasColumn(db: SqliteConnection, tableName: string, columnName: string): boolean {
@@ -312,6 +327,51 @@ async function updateSqliteProvider(
   }
 }
 
+async function readSqliteProviderCounts(codexHome: string, warnings: string[]): Promise<ProviderCounts> {
+  const dbPath = path.join(codexHome, "state_5.sqlite");
+  if (!(await pathExists(dbPath))) {
+    warnings.push("未找到 state_5.sqlite，已跳过 SQLite provider 分布检查。");
+    return {};
+  }
+
+  let db: SqliteConnection | undefined;
+  try {
+    db = await openSqliteDatabase(dbPath, { readOnly: true });
+    if (!db) {
+      warnings.push("未能加载 SQLite 后端，已跳过 SQLite provider 分布检查。");
+      return {};
+    }
+    if (!tableHasColumn(db, "threads", "model_provider")) {
+      warnings.push("state_5.sqlite 的 threads 表没有 model_provider 字段，已跳过 SQLite provider 分布检查。");
+      return {};
+    }
+
+    const rows = db.all(`
+      SELECT
+        CASE
+          WHEN model_provider IS NULL OR model_provider = '' THEN '(missing)'
+          ELSE model_provider
+        END AS model_provider,
+        COUNT(*) AS count
+      FROM threads
+      GROUP BY model_provider
+      ORDER BY model_provider
+    `);
+    const counts: ProviderCounts = {};
+    for (const row of rows) {
+      if (typeof row.model_provider === "string") {
+        counts[row.model_provider] = Number(row.count) || 0;
+      }
+    }
+    return counts;
+  } catch (error) {
+    warnings.push(`读取 state_5.sqlite provider 分布失败：${error instanceof Error ? error.message : String(error)}`);
+    return {};
+  } finally {
+    db?.close();
+  }
+}
+
 async function syncGlobalState(codexHome: string, cwdStats: CwdStat[], warnings: string[]): Promise<boolean> {
   const filePath = path.join(codexHome, ".codex-global-state.json");
   const backupPath = path.join(codexHome, ".codex-global-state.json.bak");
@@ -446,4 +506,62 @@ export async function syncSessions(codexHome: string, providerId?: string, optio
   }
 
   return { changedFiles, sqliteRowsUpdated, sqlitePresent, globalStateUpdated, warnings };
+}
+
+export async function inspectSessionSyncStatus(codexHome: string, providerId?: string): Promise<SessionSyncStatus> {
+  const warnings: string[] = [];
+  const targetProviderId = providerId ?? (await readCodexConfig(codexHome)).activeProviderId;
+  const sessionsDir = path.join(codexHome, "sessions");
+  const archivedDir = path.join(codexHome, "archived_sessions");
+  const sessionFiles = [
+    ...(await collectJsonlFiles(sessionsDir)),
+    ...(await collectJsonlFiles(archivedDir)),
+  ];
+  const sessionCounts: ProviderCounts = {};
+
+  for (const file of sessionFiles) {
+    const content = await fs.readFile(file, "utf8");
+    const provider = readJsonlProvider(content);
+    if (provider) {
+      incrementCount(sessionCounts, provider);
+    }
+  }
+
+  if (sessionFiles.length === 0) {
+    warnings.push("未找到会话 JSONL 文件，已跳过会话文件 provider 分布检查。");
+  }
+
+  const sqliteCounts = await readSqliteProviderCounts(codexHome, warnings);
+  const mismatchedSessionProviders = Object.keys(sessionCounts).filter((provider) => provider !== targetProviderId);
+  const mismatchedSqliteProviders = Object.keys(sqliteCounts).filter((provider) => provider !== targetProviderId);
+
+  return {
+    targetProviderId,
+    needsSync: Boolean(targetProviderId) && (mismatchedSessionProviders.length > 0 || mismatchedSqliteProviders.length > 0),
+    sessionFiles: sessionCounts,
+    sqlite: sqliteCounts,
+    warnings,
+  };
+}
+
+export async function ensureSessionsSynced(codexHome: string, providerId?: string): Promise<AutoRepairResult> {
+  const statusBefore = await inspectSessionSyncStatus(codexHome, providerId);
+  const warnings = [...statusBefore.warnings];
+  if (!statusBefore.targetProviderId || !statusBefore.needsSync) {
+    return {
+      statusBefore,
+      repaired: false,
+      warnings,
+    };
+  }
+
+  const sync = await syncSessions(codexHome, statusBefore.targetProviderId);
+  const statusAfter = await inspectSessionSyncStatus(codexHome, statusBefore.targetProviderId);
+  return {
+    statusBefore,
+    statusAfter,
+    sync,
+    repaired: sync.changedFiles.length > 0 || sync.sqliteRowsUpdated > 0 || sync.globalStateUpdated,
+    warnings: [...warnings, ...sync.warnings, ...statusAfter.warnings],
+  };
 }

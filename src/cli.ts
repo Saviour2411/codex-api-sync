@@ -4,6 +4,7 @@ import { getCodexHome } from "./platform.js";
 import {
   addProvider,
   doctor,
+  ensureActiveProviderSessions,
   listProviders,
   removeProvider,
   switchDefaultProvider,
@@ -76,6 +77,25 @@ function printHelp(): void {
 `);
 }
 
+function formatCounts(counts: Record<string, number>): string {
+  return Object.entries(counts)
+    .map(([provider, count]) => `${provider}:${count}`)
+    .join(", ") || "无";
+}
+
+async function runStartupRepair(codexHome: string): Promise<void> {
+  const result = await ensureActiveProviderSessions(codexHome);
+  if (result.repaired) {
+    console.warn(`已自动修复历史会话 provider 元数据到 ${result.statusBefore.targetProviderId}。`);
+  }
+  if (!result.statusBefore.needsSync && !result.statusAfter?.needsSync) {
+    return;
+  }
+  for (const warning of result.warnings) {
+    console.warn(`警告：${warning}`);
+  }
+}
+
 async function main(): Promise<void> {
   const { command, flags } = parseArgs(process.argv.slice(2));
   const codexHome = getCodexHome(stringFlag(flags, "codex-home"));
@@ -88,6 +108,7 @@ async function main(): Promise<void> {
       return;
 
     case "web": {
+      await runStartupRepair(codexHome);
       const host = stringFlag(flags, "host") ?? "127.0.0.1";
       const port = Number(stringFlag(flags, "port") ?? "14567");
       const server = await startServer({ host, port, codexHome });
@@ -96,6 +117,7 @@ async function main(): Promise<void> {
     }
 
     case "list": {
+      await runStartupRepair(codexHome);
       const providers = await listProviders(codexHome);
       if (providers.length === 0) {
         console.log("还没有配置自定义提供商。");
@@ -115,6 +137,11 @@ async function main(): Promise<void> {
       if (result.activeProvider) {
         console.log(`base_url: ${result.activeProvider.baseUrl}`);
         console.log(`experimental_bearer_token: ${result.activeProvider.hasApiKey ? "有" : "无"}`);
+      }
+      if (result.sessionSync) {
+        console.log(`会话文件 provider 分布: ${formatCounts(result.sessionSync.statusAfter?.sessionFiles ?? result.sessionSync.statusBefore.sessionFiles)}`);
+        console.log(`SQLite provider 分布: ${formatCounts(result.sessionSync.statusAfter?.sqlite ?? result.sessionSync.statusBefore.sqlite)}`);
+        console.log(`会话同步状态: ${result.sessionSync.statusAfter?.needsSync ?? result.sessionSync.statusBefore.needsSync ? "仍需同步" : "正常"}`);
       }
       for (const problem of result.problems) {
         console.error(`问题：${problem}`);
@@ -151,6 +178,7 @@ async function main(): Promise<void> {
     }
 
     case "remove": {
+      await runStartupRepair(codexHome);
       const result = await removeProvider(codexHome, requiredFlag(flags, "name"), {
         sync: flags["no-sync"] !== true,
       });
@@ -162,6 +190,7 @@ async function main(): Promise<void> {
     }
 
     case "switch": {
+      await runStartupRepair(codexHome);
       const result = await switchProvider(codexHome, requiredFlag(flags, "name"), {
         sync: flags["no-sync"] !== true,
         model: stringFlag(flags, "model"),
@@ -174,6 +203,7 @@ async function main(): Promise<void> {
     }
 
     case "switch-default": {
+      await runStartupRepair(codexHome);
       const result = await switchDefaultProvider(codexHome, {
         sync: flags["no-sync"] !== true,
         model: stringFlag(flags, "model"),
@@ -186,6 +216,7 @@ async function main(): Promise<void> {
     }
 
     case "sync": {
+      await runStartupRepair(codexHome);
       const result = await syncSessions(codexHome);
       console.log(`会话同步完成。变更文件数：${result.changedFiles.length}，SQLite 更新行数：${result.sqliteRowsUpdated}，项目缓存：${result.globalStateUpdated ? "已更新" : "未变更"}。`);
       for (const warning of result.warnings) {

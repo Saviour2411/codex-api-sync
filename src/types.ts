@@ -32,6 +32,24 @@ export type SyncResult = {
   warnings: string[];
 };
 
+export type ProviderCounts = Record<string, number>;
+
+export type SessionSyncStatus = {
+  targetProviderId?: string;
+  needsSync: boolean;
+  sessionFiles: ProviderCounts;
+  sqlite: ProviderCounts;
+  warnings: string[];
+};
+
+export type AutoRepairResult = {
+  statusBefore: SessionSyncStatus;
+  statusAfter?: SessionSyncStatus;
+  sync?: SyncResult;
+  repaired: boolean;
+  warnings: string[];
+};
+
 export type SwitchResult = {
   provider: Provider;
   sync?: SyncResult;
@@ -42,6 +60,7 @@ export type DoctorResult = {
   codexHome: string;
   activeProviderId?: string;
   activeProvider?: Provider;
+  sessionSync?: AutoRepairResult;
   problems: string[];
   warnings: string[];
 };

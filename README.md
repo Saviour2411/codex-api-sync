@@ -48,4 +48,6 @@ codex-api-sync sync
 - `state_5.sqlite` 的 `threads.model_provider`，以及可用时的 `threads.cwd`
 - `.codex-global-state.json` 和 `.codex-global-state.json.bak` 中的桌面版 workspace roots 缓存
 
+工具启动 Web、执行 `list`、`doctor`、`sync`、`switch`、`switch-default`、`remove` 时，会先检查当前 active provider 与历史会话 provider 元数据是否一致；如果当前已启用第三方 provider 但历史里仍残留 `openai` 或旧 provider，会自动同步到当前 provider。
+
 SQLite 同步会优先使用 Node.js 内置 `node:sqlite`；在 Node 20 等没有内置 SQLite 的环境下，会自动使用 `node-sqlite3-wasm` 后备实现，不需要系统安装 `sqlite3` 命令或原生编译工具。

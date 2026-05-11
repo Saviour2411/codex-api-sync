@@ -48,7 +48,10 @@ async function load() {
     api("/api/status"),
     api("/api/providers"),
   ]);
-  statusEl.textContent = status.codexHome;
+  const repairText = status.startupRepair?.repaired
+    ? ` · 已修复会话 provider 到 ${status.startupRepair.statusBefore.targetProviderId}`
+    : "";
+  statusEl.textContent = `${status.codexHome}${repairText}`;
   renderProviders(providers.providers);
 }
 

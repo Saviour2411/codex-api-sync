@@ -85,6 +85,43 @@ test("doctor 可以发现当前第三方 provider 配置是否生效", async () 
   assert.deepEqual(result.problems, []);
 });
 
+test("doctor 会自动修复当前第三方 provider 的历史会话元数据", async () => {
+  const home = await tempCodexHome();
+  const sessionDir = path.join(home, "sessions", "2026", "05", "14");
+  const sessionFile = path.join(sessionDir, "rollout.jsonl");
+  const dbPath = path.join(home, "state_5.sqlite");
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(sessionFile, [
+    JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "thread", model_provider: "openai", cwd: "/tmp/example" } }),
+    "",
+  ].join("\n"), "utf8");
+
+  const db = await openSqliteDatabase(dbPath);
+  assert.ok(db);
+  db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT, cwd TEXT)");
+  db.run("INSERT INTO threads (id, model_provider, cwd) VALUES (?, ?, ?)", ["thread", "openai", "/tmp/example"]);
+  db.close();
+
+  await addProvider(home, {
+    name: "Any",
+    baseUrl: "https://any.example/v1",
+    apiKey: "sk-any",
+  });
+  await switchProvider(home, "Any", { sync: false });
+
+  const result = await doctor(home);
+  assert.equal(result.sessionSync?.repaired, true);
+  assert.equal(result.sessionSync?.statusAfter?.needsSync, false);
+  assert.deepEqual(result.problems, []);
+  assert.match(await fs.readFile(sessionFile, "utf8"), /"model_provider":"any"/);
+
+  const verifyDb = await openSqliteDatabase(dbPath, { readOnly: true });
+  assert.ok(verifyDb);
+  const rows = verifyDb.all("SELECT model_provider FROM threads WHERE id = ?", ["thread"]);
+  verifyDb.close();
+  assert.deepEqual(rows, [{ model_provider: "any" }]);
+});
+
 test("doctor 可以发现当前 model_provider 缺少 provider 配置", async () => {
   const home = await tempCodexHome();
   await fs.writeFile(configPath(home), [

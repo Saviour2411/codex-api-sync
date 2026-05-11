@@ -7,8 +7,8 @@ import {
   type ConfigProvider,
 } from "./codex-config.js";
 import { normalizeProviderId } from "./provider-name.js";
-import { syncSessions } from "./session-sync.js";
-import type { DoctorResult, Provider, ProviderInput, ProviderUpdate, SwitchResult } from "./types.js";
+import { ensureSessionsSynced, syncSessions } from "./session-sync.js";
+import type { AutoRepairResult, DoctorResult, Provider, ProviderInput, ProviderUpdate, SwitchResult } from "./types.js";
 
 function toProvider(configProvider: ConfigProvider, activeProviderId: string | undefined): Provider {
   return {
@@ -40,12 +40,22 @@ export async function getProviderByName(codexHome: string, name: string): Promis
   return (await listProviders(codexHome)).find((provider) => provider.id === id);
 }
 
+export async function ensureActiveProviderSessions(codexHome: string): Promise<AutoRepairResult> {
+  const config = await readCodexConfig(codexHome);
+  if (!config.activeProviderId) {
+    return await ensureSessionsSynced(codexHome, undefined);
+  }
+
+  return await ensureSessionsSynced(codexHome, config.activeProviderId);
+}
+
 export async function doctor(codexHome: string): Promise<DoctorResult> {
   const config = await readCodexConfig(codexHome);
   const providers = await listProviders(codexHome);
   const activeProvider = providers.find((provider) => provider.id === config.activeProviderId);
+  const sessionSync = await ensureActiveProviderSessions(codexHome);
   const problems: string[] = [];
-  const warnings: string[] = [];
+  const warnings: string[] = [...sessionSync.warnings];
 
   if (!config.activeProviderId) {
     warnings.push("当前没有自定义 model_provider，Codex 会使用默认 OpenAI provider。");
@@ -69,12 +79,19 @@ export async function doctor(codexHome: string): Promise<DoctorResult> {
     if (config.requiresOpenAiAuth !== false) {
       problems.push("切换第三方 provider 时顶层 requires_openai_auth 应为 false。");
     }
+
+    if (sessionSync.statusAfter?.needsSync ?? sessionSync.statusBefore.needsSync) {
+      problems.push("历史会话 provider 元数据仍未完全同步到当前 provider。");
+    } else if (sessionSync.repaired) {
+      warnings.push(`已自动修复历史会话 provider 元数据到 '${config.activeProviderId}'。`);
+    }
   }
 
   return {
     codexHome,
     activeProviderId: config.activeProviderId,
     activeProvider,
+    sessionSync,
     problems,
     warnings,
   };

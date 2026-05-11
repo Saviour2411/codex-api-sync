@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   addProvider,
   doctor,
+  ensureActiveProviderSessions,
   listProviders,
   removeProvider,
   switchDefaultProvider,
@@ -12,6 +13,7 @@ import {
   updateProvider,
 } from "./provider-store.js";
 import { syncSessions } from "./session-sync.js";
+import type { AutoRepairResult } from "./types.js";
 
 export type ServerOptions = {
   host: string;
@@ -23,6 +25,10 @@ export type StartedServer = {
   host: string;
   port: number;
   close: () => Promise<void>;
+};
+
+type ServerState = {
+  startupRepair?: AutoRepairResult;
 };
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -88,8 +94,11 @@ async function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, 
 }
 
 export async function startServer(options: ServerOptions): Promise<StartedServer> {
+  const state: ServerState = {
+    startupRepair: await ensureActiveProviderSessions(options.codexHome),
+  };
   const server = http.createServer((req, res) => {
-    void handleRequest(options.codexHome, req, res).catch((error: unknown) => {
+    void handleRequest(options.codexHome, state, req, res).catch((error: unknown) => {
       sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
     });
   });
@@ -114,12 +123,12 @@ export async function startServer(options: ServerOptions): Promise<StartedServer
   };
 }
 
-async function handleRequest(codexHome: string, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+async function handleRequest(codexHome: string, state: ServerState, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const pathname = url.pathname;
 
   if (pathname === "/api/status" && req.method === "GET") {
-    sendJson(res, 200, { codexHome });
+    sendJson(res, 200, { codexHome, startupRepair: state.startupRepair });
     return;
   }
 
