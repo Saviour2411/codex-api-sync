@@ -1,30 +1,22 @@
 import {
-  hasApiKey,
-  preserveOriginalOpenAiApiKey,
-  removeApiKey,
-  restoreOriginalOpenAiApiKey,
-  setApiKey,
-  setOpenAiApiKeyFromManagedKey,
-} from "./auth-store.js";
-import {
   readCodexConfig,
   removeProviderConfig,
   switchProviderConfig,
   writeProvider,
   type ConfigProvider,
 } from "./codex-config.js";
-import { envKeyForProvider, normalizeProviderId } from "./provider-name.js";
+import { normalizeProviderId } from "./provider-name.js";
 import { syncSessions } from "./session-sync.js";
 import type { Provider, ProviderInput, ProviderUpdate, SwitchResult } from "./types.js";
 
-function toProvider(configProvider: ConfigProvider, activeProviderId: string | undefined, hasKey: boolean): Provider {
+function toProvider(configProvider: ConfigProvider, activeProviderId: string | undefined): Provider {
   return {
     id: configProvider.id,
     name: configProvider.name,
     baseUrl: configProvider.baseUrl,
-    envKey: configProvider.envKey ?? envKeyForProvider(configProvider.id),
-    hasApiKey: hasKey,
+    hasApiKey: Boolean(configProvider.experimentalBearerToken),
     usesOpenAiAuth: configProvider.requiresOpenAiAuth === true,
+    experimentalBearerToken: configProvider.experimentalBearerToken,
     model: undefined,
     wireApi: "responses",
     isActive: activeProviderId === configProvider.id,
@@ -32,19 +24,14 @@ function toProvider(configProvider: ConfigProvider, activeProviderId: string | u
 }
 
 function isManagedProvider(provider: ConfigProvider): boolean {
-  return provider.wireApi === "responses" && (
-    Boolean(provider.envKey?.startsWith("CODEX_PROVIDER_")) ||
-    provider.requiresOpenAiAuth === true
-  );
+  return provider.wireApi === "responses" && Boolean(provider.experimentalBearerToken);
 }
 
 export async function listProviders(codexHome: string): Promise<Provider[]> {
   const config = await readCodexConfig(codexHome);
   const managed = config.providers.filter(isManagedProvider);
 
-  return Promise.all(managed.map(async (provider) => (
-    toProvider(provider, config.activeProviderId, await hasApiKey(codexHome, provider.envKey ?? envKeyForProvider(provider.id)))
-  )));
+  return managed.map((provider) => toProvider(provider, config.activeProviderId));
 }
 
 export async function getProviderByName(codexHome: string, name: string): Promise<Provider | undefined> {
@@ -63,18 +50,13 @@ export async function addProvider(codexHome: string, input: ProviderInput): Prom
     throw new Error(`提供商 '${input.name}' 已存在。`);
   }
 
-  const envKey = envKeyForProvider(id);
-  if (existing.length === 0) {
-    await preserveOriginalOpenAiApiKey(codexHome);
-  }
-
-  await setApiKey(codexHome, envKey, input.apiKey);
   await writeProvider(codexHome, {
     id,
     name: input.name.trim(),
     baseUrl: normalizeUrl(input.baseUrl),
+    experimentalBearerToken: input.apiKey,
     wireApi: "responses",
-    requiresOpenAiAuth: true,
+    requiresOpenAiAuth: false,
   }, { model: input.model });
 
   const created = await getProviderByName(codexHome, input.name);
@@ -101,29 +83,23 @@ export async function updateProvider(codexHome: string, name: string, update: Pr
     throw new Error(`提供商 '${nextName}' 已存在。`);
   }
 
-  const nextEnvKey = envKeyForProvider(nextId);
   const nextBaseUrl = update.baseUrl !== undefined ? normalizeUrl(update.baseUrl) : current.baseUrl;
-
-  if (update.apiKey !== undefined) {
-    if (!update.apiKey.trim()) {
-      throw new Error("API key 不能为空。");
-    }
-    await setApiKey(codexHome, nextEnvKey, update.apiKey);
-  } else if (nextEnvKey !== current.envKey && current.hasApiKey) {
-    throw new Error("重命名提供商时必须同时提供 --api-key，以便写入新的托管 key。");
+  const nextToken = update.apiKey !== undefined ? update.apiKey.trim() : current.experimentalBearerToken;
+  if (!nextToken) {
+    throw new Error("API key 不能为空。");
   }
 
-  if (nextEnvKey !== current.envKey) {
+  if (nextId !== currentId) {
     await removeProviderConfig(codexHome, currentId);
-    await removeApiKey(codexHome, current.envKey);
   }
 
   await writeProvider(codexHome, {
     id: nextId,
     name: nextName,
     baseUrl: nextBaseUrl,
+    experimentalBearerToken: nextToken,
     wireApi: "responses",
-    requiresOpenAiAuth: true,
+    requiresOpenAiAuth: false,
   }, { active: current.isActive, model: update.model });
 
   const updated = await getProviderByName(codexHome, nextName);
@@ -151,10 +127,6 @@ export async function removeProvider(codexHome: string, name: string): Promise<{
   }
 
   await removeProviderConfig(codexHome, id, { restoreDefault: restoredDefault });
-  await removeApiKey(codexHome, target.envKey);
-  if (restoredDefault) {
-    await restoreOriginalOpenAiApiKey(codexHome);
-  }
 
   return { restoredDefault };
 }
@@ -168,10 +140,9 @@ export async function switchProvider(codexHome: string, name: string, options?: 
   }
 
   if (!provider.hasApiKey) {
-    throw new Error(`提供商 '${name}' 在 auth.json 中缺少 API key。`);
+    throw new Error(`提供商 '${name}' 缺少 experimental_bearer_token。`);
   }
 
-  await setOpenAiApiKeyFromManagedKey(codexHome, provider.envKey);
   await switchProviderConfig(codexHome, id, options?.model);
   const active = await getProviderByName(codexHome, name);
 

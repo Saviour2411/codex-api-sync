@@ -6,7 +6,7 @@ export type ConfigProvider = {
   id: string;
   name: string;
   baseUrl: string;
-  envKey?: string;
+  experimentalBearerToken?: string;
   wireApi?: string;
   requiresOpenAiAuth?: boolean;
 };
@@ -22,6 +22,7 @@ export type CodexConfig = {
   text: string;
   activeProviderId?: string;
   preferredAuthMethod?: string;
+  requiresOpenAiAuth?: boolean;
   model?: string;
   providers: ConfigProvider[];
 };
@@ -91,6 +92,28 @@ function parseTopLevelString(lines: string[], key: string): string | undefined {
     const match = pattern.exec(line);
     if (match) {
       return parseTomlString(match[1]);
+    }
+  }
+
+  return undefined;
+}
+
+function parseTopLevelBoolean(lines: string[], key: string): boolean | undefined {
+  let inTable = false;
+  const pattern = new RegExp(`^\\s*${key}\\s*=\\s*(true|false)\\s*(?:#.*)?$`);
+
+  for (const line of lines) {
+    if (/^\s*\[/.test(line)) {
+      inTable = true;
+    }
+
+    if (inTable) {
+      continue;
+    }
+
+    const match = pattern.exec(line);
+    if (match) {
+      return match[1] === "true";
     }
   }
 
@@ -176,6 +199,38 @@ function setTopLevelString(text: string, key: string, value: string): string {
   return lines.join("");
 }
 
+function setTopLevelBoolean(text: string, key: string, value: boolean): string {
+  const lines = splitLines(text);
+  const replacement = `${key} = ${value ? "true" : "false"}\n`;
+  let firstTable = lines.length;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*\[/.test(lines[i])) {
+      firstTable = i;
+      break;
+    }
+
+    if (new RegExp(`^\\s*${key}\\s*=`).test(lines[i])) {
+      const ending = lineEnding(lines[i]) || "\n";
+      lines[i] = `${key} = ${value ? "true" : "false"}${ending}`;
+      return lines.join("");
+    }
+  }
+
+  if (firstTable === 0) {
+    lines.unshift(replacement);
+  } else if (firstTable < lines.length) {
+    lines.splice(firstTable, 0, replacement);
+  } else {
+    if (lines.length > 0 && !lines[lines.length - 1].endsWith("\n")) {
+      lines[lines.length - 1] += "\n";
+    }
+    lines.push(replacement);
+  }
+
+  return lines.join("");
+}
+
 function removeTopLevelKey(text: string, key: string): string {
   const lines = splitLines(text);
   const result: string[] = [];
@@ -203,11 +258,10 @@ function providerBlockText(provider: ConfigProvider): string {
     `base_url = ${tomlString(provider.baseUrl)}`,
   ];
 
-  if (provider.envKey && !provider.requiresOpenAiAuth) {
-    lines.push(`env_key = ${tomlString(provider.envKey)}`);
-  }
-
   lines.push(`wire_api = ${tomlString(provider.wireApi ?? "responses")}`);
+  if (provider.experimentalBearerToken) {
+    lines.push(`experimental_bearer_token = ${tomlString(provider.experimentalBearerToken)}`);
+  }
   if (provider.requiresOpenAiAuth) {
     lines.push("requires_openai_auth = true");
   }
@@ -221,7 +275,7 @@ export async function readCodexConfig(codexHome: string): Promise<CodexConfig> {
     id: block.id,
     name: block.values.name ?? block.id,
     baseUrl: block.values.base_url ?? "",
-    envKey: block.values.env_key,
+    experimentalBearerToken: block.values.experimental_bearer_token,
     wireApi: block.values.wire_api,
     requiresOpenAiAuth: block.values.requires_openai_auth === "true",
   }));
@@ -230,6 +284,7 @@ export async function readCodexConfig(codexHome: string): Promise<CodexConfig> {
     text,
     activeProviderId: parseTopLevelString(lines, "model_provider"),
     preferredAuthMethod: parseTopLevelString(lines, "preferred_auth_method"),
+    requiresOpenAiAuth: parseTopLevelBoolean(lines, "requires_openai_auth"),
     model: parseTopLevelString(lines, "model"),
     providers,
   };
@@ -257,6 +312,7 @@ export async function writeProvider(codexHome: string, provider: ConfigProvider,
   if (options?.active) {
     text = setTopLevelString(text, "model_provider", provider.id);
     text = setTopLevelString(text, "preferred_auth_method", "apikey");
+    text = setTopLevelBoolean(text, "requires_openai_auth", false);
   }
 
   if (options?.model !== undefined && options.model.trim()) {
@@ -273,6 +329,7 @@ export async function switchProviderConfig(codexHome: string, providerId: string
   let text = await readTextIfExists(filePath);
   text = setTopLevelString(text, "model_provider", providerId);
   text = setTopLevelString(text, "preferred_auth_method", "apikey");
+  text = setTopLevelBoolean(text, "requires_openai_auth", false);
 
   if (model !== undefined && model.trim()) {
     text = setTopLevelString(text, "model", model.trim());
@@ -299,6 +356,7 @@ export async function removeProviderConfig(codexHome: string, providerId: string
   if (options?.restoreDefault) {
     nextText = removeTopLevelKey(nextText, "model_provider");
     nextText = removeTopLevelKey(nextText, "preferred_auth_method");
+    nextText = removeTopLevelKey(nextText, "requires_openai_auth");
   }
 
   await writeTextAtomic(filePath, nextText);

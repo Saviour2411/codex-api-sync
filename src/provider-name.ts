@@ -20,11 +20,6 @@ export function normalizeProviderId(name: string): string {
   return id;
 }
 
-export function envKeyForProvider(id: string): string {
-  const suffix = id.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  return `CODEX_PROVIDER_${suffix}_API_KEY`;
-}
-
 export function assertValidProviderId(id: string): void {
   if (!/^[a-z0-9_-]+$/.test(id)) {
     throw new Error(`无效的提供商 id：'${id}'。`);

@@ -2,11 +2,11 @@
 
 用于切换 Codex Responses API 提供商的本地 Web 和 CLI 工具，修改配置时会保留无关的 Codex 配置项。
 
-工具会把每个提供商的 API key 存在 `auth.json` 中，字段名类似
-`CODEX_PROVIDER_ANY_API_KEY`。切换提供商时，工具会把选中的 key 复制到
-`OPENAI_API_KEY`，因为 Codex 对 `requires_openai_auth = true` 的提供商会读取这个认证字段。
+工具会把每个提供商的 API key 写入对应 `[model_providers.<id>]` 的
+`experimental_bearer_token` 字段，不再修改 `auth.json`。切换提供商时只会更新顶层
+`preferred_auth_method`、`requires_openai_auth` 和 `model_provider`。
 
-添加第一个受管提供商前，工具会用私有字段保存原始 `OPENAI_API_KEY` 状态。删除最后一个受管提供商时，会恢复原始 key；如果原来不存在，则把 `OPENAI_API_KEY` 保留为空字符串。
+官方文档把 `experimental_bearer_token` 标为实验字段；这里采用它是因为实测兼容性更好，且可以避免修改全局 `auth.json`。
 
 ## 使用
 
@@ -33,4 +33,4 @@ codex-api-sync switch --name <name> [--model <model>] [--no-sync]
 codex-api-sync sync
 ```
 
-删除最后一个自定义提供商时，工具会删除自定义 `model_provider` 和 `preferred_auth_method`，让 Codex 回到官方 OpenAI provider 路径。
+删除最后一个自定义提供商时，工具会删除顶层 `preferred_auth_method`、`requires_openai_auth` 和 `model_provider`，让 Codex 回到官方默认 provider 路径。

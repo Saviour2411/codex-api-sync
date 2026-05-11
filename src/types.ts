@@ -2,9 +2,9 @@ export type Provider = {
   id: string;
   name: string;
   baseUrl: string;
-  envKey: string;
   hasApiKey: boolean;
   usesOpenAiAuth: boolean;
+  experimentalBearerToken?: string;
   model?: string;
   wireApi: "responses";
   isActive: boolean;
