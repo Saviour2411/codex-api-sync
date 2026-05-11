@@ -34,3 +34,11 @@ export type SwitchResult = {
   sync?: SyncResult;
   warnings: string[];
 };
+
+export type DoctorResult = {
+  codexHome: string;
+  activeProviderId?: string;
+  activeProvider?: Provider;
+  problems: string[];
+  warnings: string[];
+};

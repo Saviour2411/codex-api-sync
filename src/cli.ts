@@ -3,6 +3,7 @@ import { startServer } from "./server.js";
 import { getCodexHome } from "./platform.js";
 import {
   addProvider,
+  doctor,
   listProviders,
   removeProvider,
   switchDefaultProvider,
@@ -65,6 +66,7 @@ function printHelp(): void {
 用法：
   codex-api-sync web [--host 127.0.0.1] [--port 14567] [--codex-home <path>]
   codex-api-sync list [--codex-home <path>]
+  codex-api-sync doctor [--codex-home <path>]
   codex-api-sync add --name <name> --base-url <url> --api-key <key> [--model <model>]
   codex-api-sync update --name <name> [--new-name <name>] [--base-url <url>] [--api-key <key>] [--model <model>]
   codex-api-sync remove --name <name> [--no-sync]
@@ -102,6 +104,26 @@ async function main(): Promise<void> {
 
       for (const provider of providers) {
         console.log(`${provider.isActive ? "*" : " "} ${provider.name} (${provider.id}) ${provider.baseUrl} ${provider.hasApiKey ? "key:有" : "key:无"}`);
+      }
+      return;
+    }
+
+    case "doctor": {
+      const result = await doctor(codexHome);
+      console.log(`Codex Home: ${result.codexHome}`);
+      console.log(`当前 provider: ${result.activeProviderId ?? "openai"}`);
+      if (result.activeProvider) {
+        console.log(`base_url: ${result.activeProvider.baseUrl}`);
+        console.log(`experimental_bearer_token: ${result.activeProvider.hasApiKey ? "有" : "无"}`);
+      }
+      for (const problem of result.problems) {
+        console.error(`问题：${problem}`);
+      }
+      for (const warning of result.warnings) {
+        console.warn(`警告：${warning}`);
+      }
+      if (result.problems.length > 0) {
+        process.exitCode = 1;
       }
       return;
     }

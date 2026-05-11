@@ -8,7 +8,7 @@ import {
 } from "./codex-config.js";
 import { normalizeProviderId } from "./provider-name.js";
 import { syncSessions } from "./session-sync.js";
-import type { Provider, ProviderInput, ProviderUpdate, SwitchResult } from "./types.js";
+import type { DoctorResult, Provider, ProviderInput, ProviderUpdate, SwitchResult } from "./types.js";
 
 function toProvider(configProvider: ConfigProvider, activeProviderId: string | undefined): Provider {
   return {
@@ -38,6 +38,46 @@ export async function listProviders(codexHome: string): Promise<Provider[]> {
 export async function getProviderByName(codexHome: string, name: string): Promise<Provider | undefined> {
   const id = normalizeProviderId(name);
   return (await listProviders(codexHome)).find((provider) => provider.id === id);
+}
+
+export async function doctor(codexHome: string): Promise<DoctorResult> {
+  const config = await readCodexConfig(codexHome);
+  const providers = await listProviders(codexHome);
+  const activeProvider = providers.find((provider) => provider.id === config.activeProviderId);
+  const problems: string[] = [];
+  const warnings: string[] = [];
+
+  if (!config.activeProviderId) {
+    warnings.push("当前没有自定义 model_provider，Codex 会使用默认 OpenAI provider。");
+  } else if (!activeProvider) {
+    problems.push(`当前 model_provider '${config.activeProviderId}' 没有对应的受管 provider 配置。`);
+  }
+
+  if (activeProvider) {
+    if (!activeProvider.hasApiKey) {
+      problems.push(`当前 provider '${activeProvider.id}' 缺少 experimental_bearer_token。`);
+    }
+
+    if (activeProvider.baseUrl === "https://api.openai.com/v1") {
+      problems.push(`当前 provider '${activeProvider.id}' 的 base_url 仍指向官方 OpenAI。`);
+    }
+
+    if (config.preferredAuthMethod !== "apikey") {
+      problems.push("切换第三方 provider 时 preferred_auth_method 应为 \"apikey\"。");
+    }
+
+    if (config.requiresOpenAiAuth !== false) {
+      problems.push("切换第三方 provider 时顶层 requires_openai_auth 应为 false。");
+    }
+  }
+
+  return {
+    codexHome,
+    activeProviderId: config.activeProviderId,
+    activeProvider,
+    problems,
+    warnings,
+  };
 }
 
 export async function addProvider(codexHome: string, input: ProviderInput): Promise<Provider> {

@@ -26,6 +26,7 @@ node dist/cli.js web
 ```sh
 codex-api-sync web [--host 127.0.0.1] [--port 14567] [--codex-home <path>]
 codex-api-sync list [--codex-home <path>]
+codex-api-sync doctor [--codex-home <path>]
 codex-api-sync add --name <name> --base-url <url> --api-key <key> [--model <model>]
 codex-api-sync update --name <name> [--new-name <name>] [--base-url <url>] [--api-key <key>] [--model <model>]
 codex-api-sync remove --name <name> [--no-sync]

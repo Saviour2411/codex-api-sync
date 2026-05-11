@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   addProvider,
+  doctor,
   listProviders,
   removeProvider,
   switchDefaultProvider,
@@ -119,6 +120,11 @@ async function handleRequest(codexHome: string, req: http.IncomingMessage, res: 
 
   if (pathname === "/api/status" && req.method === "GET") {
     sendJson(res, 200, { codexHome });
+    return;
+  }
+
+  if (pathname === "/api/doctor" && req.method === "GET") {
+    sendJson(res, 200, await doctor(codexHome));
     return;
   }
 

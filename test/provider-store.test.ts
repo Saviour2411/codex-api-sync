@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { addProvider, listProviders, removeProvider, switchDefaultProvider, switchProvider, updateProvider } from "../src/provider-store.js";
+import { addProvider, doctor, listProviders, removeProvider, switchDefaultProvider, switchProvider, updateProvider } from "../src/provider-store.js";
 import { authPath, configPath } from "../src/platform.js";
 
 async function tempCodexHome(): Promise<string> {
@@ -66,6 +66,35 @@ test("切换提供商时只改全局 provider 字段，不改 auth.json", async 
 
   const auth = JSON.parse(await fs.readFile(authPath(home), "utf8")) as Record<string, unknown>;
   assert.deepEqual(auth, { OPENAI_API_KEY: "original" });
+});
+
+test("doctor 可以发现当前第三方 provider 配置是否生效", async () => {
+  const home = await tempCodexHome();
+  await addProvider(home, {
+    name: "Any",
+    baseUrl: "https://any.example/v1",
+    apiKey: "sk-any",
+  });
+  await switchProvider(home, "Any", { sync: false });
+
+  const result = await doctor(home);
+  assert.equal(result.activeProviderId, "any");
+  assert.equal(result.activeProvider?.baseUrl, "https://any.example/v1");
+  assert.deepEqual(result.problems, []);
+});
+
+test("doctor 可以发现当前 model_provider 缺少 provider 配置", async () => {
+  const home = await tempCodexHome();
+  await fs.writeFile(configPath(home), [
+    'model_provider = "tmp"',
+    'preferred_auth_method = "apikey"',
+    'requires_openai_auth = false',
+    "",
+  ].join("\n"), "utf8");
+
+  const result = await doctor(home);
+  assert.equal(result.activeProviderId, "tmp");
+  assert.match(result.problems.join("\n"), /没有对应的受管 provider 配置/);
 });
 
 test("写入顶层字段时不会生成重复 model 或 model_providermodel 脏字段", async () => {

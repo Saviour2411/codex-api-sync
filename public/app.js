@@ -3,6 +3,7 @@ const providersEl = document.querySelector("#providers");
 const messageEl = document.querySelector("#message");
 const statusEl = document.querySelector("#status");
 const syncButton = document.querySelector("#syncButton");
+const doctorButton = document.querySelector("#doctorButton");
 const defaultButton = document.querySelector("#defaultButton");
 const clearButton = document.querySelector("#clearButton");
 
@@ -136,6 +137,14 @@ clearButton.addEventListener("click", () => {
 syncButton.addEventListener("click", async () => {
   try {
     showMessage(await api("/api/sync", { method: "POST" }));
+  } catch (error) {
+    showMessage(error.message);
+  }
+});
+
+doctorButton.addEventListener("click", async () => {
+  try {
+    showMessage(await api("/api/doctor"));
   } catch (error) {
     showMessage(error.message);
   }
