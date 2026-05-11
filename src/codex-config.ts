@@ -262,8 +262,8 @@ function providerBlockText(provider: ConfigProvider): string {
   if (provider.experimentalBearerToken) {
     lines.push(`experimental_bearer_token = ${tomlString(provider.experimentalBearerToken)}`);
   }
-  if (provider.requiresOpenAiAuth) {
-    lines.push("requires_openai_auth = true");
+  if (provider.requiresOpenAiAuth !== undefined) {
+    lines.push(`requires_openai_auth = ${provider.requiresOpenAiAuth ? "true" : "false"}`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -277,7 +277,7 @@ export async function readCodexConfig(codexHome: string): Promise<CodexConfig> {
     baseUrl: block.values.base_url ?? "",
     experimentalBearerToken: block.values.experimental_bearer_token,
     wireApi: block.values.wire_api,
-    requiresOpenAiAuth: block.values.requires_openai_auth === "true",
+    requiresOpenAiAuth: block.values.requires_openai_auth === "true" ? true : block.values.requires_openai_auth === "false" ? false : undefined,
   }));
 
   return {

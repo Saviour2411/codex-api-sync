@@ -40,6 +40,7 @@ test("添加提供商时写入 bearer token 配置并保留 auth.json", async ()
   assert.match(config, /base_url = "https:\/\/example\.com\/v1"/);
   assert.match(config, /wire_api = "responses"/);
   assert.match(config, /experimental_bearer_token = "sk-any"/);
+  assert.match(config, /requires_openai_auth = false/);
   assert.doesNotMatch(config, /requires_openai_auth = true/);
   assert.doesNotMatch(config, /env_key =/);
 
@@ -253,10 +254,11 @@ test("可以在保留自定义提供商时手动切换到默认 OpenAI", async (
   assert.equal((await listProviders(home)).length, 1);
 
   const config = await fs.readFile(configPath(home), "utf8");
+  const topLevelConfig = config.slice(0, config.indexOf("[projects."));
   assert.match(config, /\[model_providers\.any\]/);
-  assert.doesNotMatch(config, /model_provider =/);
-  assert.doesNotMatch(config, /preferred_auth_method =/);
-  assert.doesNotMatch(config, /requires_openai_auth =/);
+  assert.doesNotMatch(topLevelConfig, /model_provider =/);
+  assert.doesNotMatch(topLevelConfig, /preferred_auth_method =/);
+  assert.doesNotMatch(topLevelConfig, /requires_openai_auth =/);
 
   const synced = await fs.readFile(sessionFile, "utf8");
   assert.match(synced, /"model_provider":"openai"/);

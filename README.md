@@ -3,7 +3,8 @@
 用于切换 Codex Responses API 提供商的本地 Web 和 CLI 工具，修改配置时会保留无关的 Codex 配置项。
 
 工具会把每个提供商的 API key 写入对应 `[model_providers.<id>]` 的
-`experimental_bearer_token` 字段，不再修改 `auth.json`。切换提供商时只会更新顶层
+`experimental_bearer_token` 字段，并在 provider 块里显式写入
+`requires_openai_auth = false`，不再修改 `auth.json`。切换提供商时只会更新顶层
 `preferred_auth_method`、`requires_openai_auth` 和 `model_provider`。
 
 官方文档把 `experimental_bearer_token` 标为实验字段；这里采用它是因为实测兼容性更好，且可以避免修改全局 `auth.json`。
