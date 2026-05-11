@@ -79,7 +79,7 @@ async function loadWasmSqlite(): Promise<WasmSqliteModule | undefined> {
 export async function openSqliteDatabase(filePath: string, options?: { readOnly?: boolean }): Promise<SqliteConnection | undefined> {
   const nodeSqlite = await loadNodeSqlite();
   if (nodeSqlite) {
-    const db = new nodeSqlite.DatabaseSync(filePath, options);
+    const db = new nodeSqlite.DatabaseSync(filePath, options ?? {});
     return {
       backend: "node:sqlite",
       exec: (sql) => db.exec(sql),

@@ -52,6 +52,7 @@ export async function ensureActiveProviderSessions(codexHome: string): Promise<A
 export async function doctor(codexHome: string): Promise<DoctorResult> {
   const config = await readCodexConfig(codexHome);
   const providers = await listProviders(codexHome);
+  const configActiveProvider = config.providers.find((provider) => provider.id === config.activeProviderId);
   const activeProvider = providers.find((provider) => provider.id === config.activeProviderId);
   const sessionSync = await ensureActiveProviderSessions(codexHome);
   const problems: string[] = [];
@@ -78,6 +79,10 @@ export async function doctor(codexHome: string): Promise<DoctorResult> {
 
     if (config.requiresOpenAiAuth !== false) {
       problems.push("切换第三方 provider 时顶层 requires_openai_auth 应为 false。");
+    }
+
+    if (configActiveProvider?.requiresOpenAiAuth !== false) {
+      problems.push(`当前 provider '${activeProvider.id}' 块内 requires_openai_auth 应为 false。`);
     }
 
     if (sessionSync.statusAfter?.needsSync ?? sessionSync.statusBefore.needsSync) {
