@@ -168,7 +168,8 @@ async function handleRequest(codexHome: string, req: http.IncomingMessage, res: 
     }
 
     if (req.method === "DELETE") {
-      sendJson(res, 200, await removeProvider(codexHome, providerName));
+      const body = await readBody(req) as { noSync?: boolean };
+      sendJson(res, 200, await removeProvider(codexHome, providerName, { sync: body.noSync !== true }));
       return;
     }
 

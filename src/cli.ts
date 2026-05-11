@@ -67,7 +67,7 @@ function printHelp(): void {
   codex-api-sync list [--codex-home <path>]
   codex-api-sync add --name <name> --base-url <url> --api-key <key> [--model <model>]
   codex-api-sync update --name <name> [--new-name <name>] [--base-url <url>] [--api-key <key>] [--model <model>]
-  codex-api-sync remove --name <name>
+  codex-api-sync remove --name <name> [--no-sync]
   codex-api-sync switch --name <name> [--model <model>] [--no-sync]
   codex-api-sync switch-default [--model <model>] [--no-sync]
   codex-api-sync sync
@@ -129,8 +129,13 @@ async function main(): Promise<void> {
     }
 
     case "remove": {
-      const result = await removeProvider(codexHome, requiredFlag(flags, "name"));
+      const result = await removeProvider(codexHome, requiredFlag(flags, "name"), {
+        sync: flags["no-sync"] !== true,
+      });
       console.log(result.restoredDefault ? "已删除提供商，并恢复官方 OpenAI 默认配置。" : "已删除提供商。");
+      for (const warning of result.sync?.warnings ?? []) {
+        console.warn(`警告：${warning}`);
+      }
       return;
     }
 

@@ -95,6 +95,14 @@ test("切换提供商默认同步 session_meta model_provider", async () => {
 
 test("删除最后一个自定义提供商时恢复官方默认配置路径", async () => {
   const home = await tempCodexHome();
+  const sessionDir = path.join(home, "sessions", "2026", "05", "12");
+  const sessionFile = path.join(sessionDir, "rollout.jsonl");
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(sessionFile, [
+    JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "thread", model_provider: "any" } }),
+    "",
+  ].join("\n"), "utf8");
+
   await addProvider(home, {
     name: "Any",
     baseUrl: "https://any.example/v1",
@@ -104,6 +112,7 @@ test("删除最后一个自定义提供商时恢复官方默认配置路径", as
 
   const result = await removeProvider(home, "Any");
   assert.equal(result.restoredDefault, true);
+  assert.equal(result.sync?.changedFiles.length, 1);
   assert.deepEqual(await listProviders(home), []);
 
   const config = await fs.readFile(configPath(home), "utf8");
@@ -115,6 +124,38 @@ test("删除最后一个自定义提供商时恢复官方默认配置路径", as
 
   const auth = JSON.parse(await fs.readFile(authPath(home), "utf8")) as Record<string, unknown>;
   assert.deepEqual(auth, { OPENAI_API_KEY: "original" });
+
+  const synced = await fs.readFile(sessionFile, "utf8");
+  assert.match(synced, /"model_provider":"openai"/);
+});
+
+test("删除非最后一个提供商时也会清理该 provider 的历史引用", async () => {
+  const home = await tempCodexHome();
+  const sessionDir = path.join(home, "sessions", "2026", "05", "13");
+  const tmpFile = path.join(sessionDir, "tmp.jsonl");
+  const otherFile = path.join(sessionDir, "other.jsonl");
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(tmpFile, `${JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "tmp", model_provider: "tmp" } })}\n`, "utf8");
+  await fs.writeFile(otherFile, `${JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "other", model_provider: "other" } })}\n`, "utf8");
+
+  await addProvider(home, {
+    name: "tmp",
+    baseUrl: "https://tmp.example/v1",
+    apiKey: "sk-tmp",
+  });
+  await addProvider(home, {
+    name: "other",
+    baseUrl: "https://other.example/v1",
+    apiKey: "sk-other",
+  });
+  await switchProvider(home, "other", { sync: false });
+
+  const result = await removeProvider(home, "tmp");
+  assert.equal(result.restoredDefault, false);
+  assert.equal(result.sync?.changedFiles.length, 1);
+
+  assert.match(await fs.readFile(tmpFile, "utf8"), /"model_provider":"openai"/);
+  assert.match(await fs.readFile(otherFile, "utf8"), /"model_provider":"other"/);
 });
 
 test("可以在保留自定义提供商时手动切换到默认 OpenAI", async () => {

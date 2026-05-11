@@ -111,7 +111,7 @@ export async function updateProvider(codexHome: string, name: string, update: Pr
   return updated;
 }
 
-export async function removeProvider(codexHome: string, name: string): Promise<{ restoredDefault: boolean }> {
+export async function removeProvider(codexHome: string, name: string, options?: { sync?: boolean }): Promise<{ restoredDefault: boolean; sync?: Awaited<ReturnType<typeof syncSessions>> }> {
   const id = normalizeProviderId(name);
   const providers = await listProviders(codexHome);
   const target = providers.find((provider) => provider.id === id);
@@ -127,9 +127,10 @@ export async function removeProvider(codexHome: string, name: string): Promise<{
     throw new Error("仍有其它自定义提供商时，不能删除当前激活提供商。请先切换。");
   }
 
+  const sync = options?.sync === false ? undefined : await syncSessions(codexHome, "openai", { fromProviderId: id });
   await removeProviderConfig(codexHome, id, { restoreDefault: restoredDefault });
 
-  return { restoredDefault };
+  return { restoredDefault, sync };
 }
 
 export async function switchProvider(codexHome: string, name: string, options?: { sync?: boolean; model?: string }): Promise<SwitchResult> {

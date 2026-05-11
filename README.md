@@ -28,7 +28,7 @@ codex-api-sync web [--host 127.0.0.1] [--port 14567] [--codex-home <path>]
 codex-api-sync list [--codex-home <path>]
 codex-api-sync add --name <name> --base-url <url> --api-key <key> [--model <model>]
 codex-api-sync update --name <name> [--new-name <name>] [--base-url <url>] [--api-key <key>] [--model <model>]
-codex-api-sync remove --name <name>
+codex-api-sync remove --name <name> [--no-sync]
 codex-api-sync switch --name <name> [--model <model>] [--no-sync]
 codex-api-sync switch-default [--model <model>] [--no-sync]
 codex-api-sync sync
@@ -36,3 +36,4 @@ codex-api-sync sync
 
 删除最后一个自定义提供商时，工具会删除顶层 `preferred_auth_method`、`requires_openai_auth` 和 `model_provider`，让 Codex 回到官方默认 provider 路径。
 也可以用 `switch-default` 或 Web 页面里的“默认 OpenAI”按钮手动切回默认 provider，而不删除任何自定义提供商。
+删除任意提供商时，工具会先把历史会话中引用该提供商的 `model_provider` 改为 `openai`，避免 Codex 打开历史会话时报 provider 不存在。

@@ -31,7 +31,7 @@ async function touchIfExists(filePath: string, warnings: string[]): Promise<bool
   return true;
 }
 
-function syncJsonlContent(content: string, providerId: string): { content: string; changed: boolean } {
+function syncJsonlContent(content: string, providerId: string, fromProviderId?: string): { content: string; changed: boolean } {
   const lines = content.match(/[^\n]*\n|[^\n]+/g) ?? [];
   let changed = false;
 
@@ -52,7 +52,7 @@ function syncJsonlContent(content: string, providerId: string): { content: strin
         typeof (item as { payload: unknown }).payload === "object"
       ) {
         const payload = (item as { payload: Record<string, unknown> }).payload;
-        if (payload.model_provider !== providerId) {
+        if ((!fromProviderId || payload.model_provider === fromProviderId) && payload.model_provider !== providerId) {
           payload.model_provider = providerId;
           changed = true;
           return `${JSON.stringify(item)}${ending}`;
@@ -68,7 +68,7 @@ function syncJsonlContent(content: string, providerId: string): { content: strin
   return { content: nextLines.join(""), changed };
 }
 
-export async function syncSessions(codexHome: string, providerId?: string): Promise<SyncResult> {
+export async function syncSessions(codexHome: string, providerId?: string, options?: { fromProviderId?: string }): Promise<SyncResult> {
   const warnings: string[] = [];
   const changedFiles: string[] = [];
   const targetProviderId = providerId ?? (await readCodexConfig(codexHome)).activeProviderId;
@@ -97,7 +97,7 @@ export async function syncSessions(codexHome: string, providerId?: string): Prom
       continue;
     }
 
-    const synced = syncJsonlContent(content, targetProviderId);
+    const synced = syncJsonlContent(content, targetProviderId, options?.fromProviderId);
     if (synced.changed) {
       await fs.copyFile(file, `${file}.bak`);
       await fs.writeFile(file, synced.content, "utf8");
