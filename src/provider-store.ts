@@ -2,6 +2,7 @@ import {
   readCodexConfig,
   removeProviderConfig,
   switchProviderConfig,
+  switchToDefaultProviderConfig,
   writeProvider,
   type ConfigProvider,
 } from "./codex-config.js";
@@ -154,6 +155,30 @@ export async function switchProvider(codexHome: string, name: string, options?: 
 
   return {
     provider: active ?? { ...provider, isActive: true },
+    sync,
+    warnings,
+  };
+}
+
+export async function switchDefaultProvider(codexHome: string, options?: { sync?: boolean; model?: string }): Promise<SwitchResult> {
+  await switchToDefaultProviderConfig(codexHome, options?.model);
+
+  const warnings: string[] = [];
+  const sync = options?.sync === false ? undefined : await syncSessions(codexHome, "openai");
+  if (sync) {
+    warnings.push(...sync.warnings);
+  }
+
+  return {
+    provider: {
+      id: "openai",
+      name: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      hasApiKey: true,
+      usesOpenAiAuth: true,
+      wireApi: "responses",
+      isActive: true,
+    },
     sync,
     warnings,
   };

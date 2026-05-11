@@ -5,6 +5,7 @@ import {
   addProvider,
   listProviders,
   removeProvider,
+  switchDefaultProvider,
   switchProvider,
   updateProvider,
 } from "./provider-store.js";
@@ -22,7 +23,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   for (let i = 0; i < rest.length; i += 1) {
     const token = rest[i];
     if (!token.startsWith("--")) {
-    throw new Error(`无法识别的参数：'${token}'。`);
+      throw new Error(`无法识别的参数：'${token}'。`);
     }
 
     const raw = token.slice(2);
@@ -68,6 +69,7 @@ function printHelp(): void {
   codex-api-sync update --name <name> [--new-name <name>] [--base-url <url>] [--api-key <key>] [--model <model>]
   codex-api-sync remove --name <name>
   codex-api-sync switch --name <name> [--model <model>] [--no-sync]
+  codex-api-sync switch-default [--model <model>] [--no-sync]
   codex-api-sync sync
 `);
 }
@@ -138,6 +140,18 @@ async function main(): Promise<void> {
         model: stringFlag(flags, "model"),
       });
       console.log(`已切换到提供商 ${result.provider.name}。`);
+      for (const warning of result.warnings) {
+        console.warn(`警告：${warning}`);
+      }
+      return;
+    }
+
+    case "switch-default": {
+      const result = await switchDefaultProvider(codexHome, {
+        sync: flags["no-sync"] !== true,
+        model: stringFlag(flags, "model"),
+      });
+      console.log(`已切换到默认提供商 ${result.provider.name}。`);
       for (const warning of result.warnings) {
         console.warn(`警告：${warning}`);
       }

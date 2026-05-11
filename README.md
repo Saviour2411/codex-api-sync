@@ -30,7 +30,9 @@ codex-api-sync add --name <name> --base-url <url> --api-key <key> [--model <mode
 codex-api-sync update --name <name> [--new-name <name>] [--base-url <url>] [--api-key <key>] [--model <model>]
 codex-api-sync remove --name <name>
 codex-api-sync switch --name <name> [--model <model>] [--no-sync]
+codex-api-sync switch-default [--model <model>] [--no-sync]
 codex-api-sync sync
 ```
 
 删除最后一个自定义提供商时，工具会删除顶层 `preferred_auth_method`、`requires_openai_auth` 和 `model_provider`，让 Codex 回到官方默认 provider 路径。
+也可以用 `switch-default` 或 Web 页面里的“默认 OpenAI”按钮手动切回默认 provider，而不删除任何自定义提供商。

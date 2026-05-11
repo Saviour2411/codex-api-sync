@@ -6,6 +6,7 @@ import {
   addProvider,
   listProviders,
   removeProvider,
+  switchDefaultProvider,
   switchProvider,
   updateProvider,
 } from "./provider-store.js";
@@ -133,6 +134,17 @@ async function handleRequest(codexHome: string, req: http.IncomingMessage, res: 
     }
 
     methodNotAllowed(res);
+    return;
+  }
+
+  if (pathname === "/api/providers/default/switch") {
+    if (req.method !== "POST") {
+      methodNotAllowed(res);
+      return;
+    }
+
+    const body = await readBody(req) as { noSync?: boolean; model?: string };
+    sendJson(res, 200, await switchDefaultProvider(codexHome, { sync: body.noSync !== true, model: body.model }));
     return;
   }
 

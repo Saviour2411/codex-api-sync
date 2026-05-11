@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { addProvider, listProviders, removeProvider, switchProvider, updateProvider } from "../src/provider-store.js";
+import { addProvider, listProviders, removeProvider, switchDefaultProvider, switchProvider, updateProvider } from "../src/provider-store.js";
 import { authPath, configPath } from "../src/platform.js";
 
 async function tempCodexHome(): Promise<string> {
@@ -115,6 +115,38 @@ test("删除最后一个自定义提供商时恢复官方默认配置路径", as
 
   const auth = JSON.parse(await fs.readFile(authPath(home), "utf8")) as Record<string, unknown>;
   assert.deepEqual(auth, { OPENAI_API_KEY: "original" });
+});
+
+test("可以在保留自定义提供商时手动切换到默认 OpenAI", async () => {
+  const home = await tempCodexHome();
+  const sessionDir = path.join(home, "sessions", "2026", "05", "11");
+  const sessionFile = path.join(sessionDir, "rollout.jsonl");
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(sessionFile, [
+    JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "thread", model_provider: "any" } }),
+    "",
+  ].join("\n"), "utf8");
+
+  await addProvider(home, {
+    name: "Any",
+    baseUrl: "https://any.example/v1",
+    apiKey: "sk-any",
+  });
+  await switchProvider(home, "Any", { sync: false });
+
+  const result = await switchDefaultProvider(home);
+  assert.equal(result.provider.id, "openai");
+  assert.equal(result.sync?.changedFiles.length, 1);
+  assert.equal((await listProviders(home)).length, 1);
+
+  const config = await fs.readFile(configPath(home), "utf8");
+  assert.match(config, /\[model_providers\.any\]/);
+  assert.doesNotMatch(config, /model_provider =/);
+  assert.doesNotMatch(config, /preferred_auth_method =/);
+  assert.doesNotMatch(config, /requires_openai_auth =/);
+
+  const synced = await fs.readFile(sessionFile, "utf8");
+  assert.match(synced, /"model_provider":"openai"/);
 });
 
 test("仍有其它自定义提供商时禁止删除当前激活提供商", async () => {

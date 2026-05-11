@@ -338,6 +338,20 @@ export async function switchProviderConfig(codexHome: string, providerId: string
   await writeTextAtomic(filePath, text);
 }
 
+export async function switchToDefaultProviderConfig(codexHome: string, model?: string): Promise<void> {
+  const filePath = configPath(codexHome);
+  let text = await readTextIfExists(filePath);
+  text = removeTopLevelKey(text, "model_provider");
+  text = removeTopLevelKey(text, "preferred_auth_method");
+  text = removeTopLevelKey(text, "requires_openai_auth");
+
+  if (model !== undefined && model.trim()) {
+    text = setTopLevelString(text, "model", model.trim());
+  }
+
+  await writeTextAtomic(filePath, text);
+}
+
 export async function removeProviderConfig(codexHome: string, providerId: string, options?: { restoreDefault?: boolean }): Promise<void> {
   assertValidProviderId(providerId);
 
