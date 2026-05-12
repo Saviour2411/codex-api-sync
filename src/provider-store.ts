@@ -7,7 +7,7 @@ import {
   type ConfigProvider,
 } from "./codex-config.js";
 import { normalizeProviderId } from "./provider-name.js";
-import { ensureSessionsSynced, syncSessions } from "./session-sync.js";
+import { ensureSessionsSynced, inspectSessionSyncStatus, syncSessions } from "./session-sync.js";
 import type { AutoRepairResult, DoctorResult, Provider, ProviderInput, ProviderUpdate, SwitchResult } from "./types.js";
 
 function toProvider(configProvider: ConfigProvider, activeProviderId: string | undefined): Provider {
@@ -89,6 +89,11 @@ export async function doctor(codexHome: string): Promise<DoctorResult> {
       problems.push("历史会话 provider 元数据仍未完全同步到当前 provider。");
     } else if (sessionSync.repaired) {
       warnings.push(`已自动修复历史会话 provider 元数据到 '${config.activeProviderId}'。`);
+    }
+
+    const protectedEncryptedTotal = sessionSync.statusAfter?.protectedEncryptedSessions.total ?? sessionSync.statusBefore.protectedEncryptedSessions.total;
+    if (protectedEncryptedTotal > 0) {
+      warnings.push(`检测到 ${protectedEncryptedTotal} 个包含 encrypted_content 的历史会话。它们不能安全迁移到当前 provider，工具已保留原 provider；这些旧会话需要切回原 provider 或新开会话继续。`);
     }
   }
 
@@ -187,6 +192,12 @@ export async function removeProvider(codexHome: string, name: string, options?: 
 
   if (target.isActive && !restoredDefault) {
     throw new Error("仍有其它自定义提供商时，不能删除当前激活提供商。请先切换。");
+  }
+
+  const protectedStatus = await inspectSessionSyncStatus(codexHome, "openai");
+  const protectedCount = protectedStatus.protectedEncryptedSessions.byProvider[id] ?? 0;
+  if (protectedCount > 0) {
+    throw new Error(`提供商 '${name}' 仍有 ${protectedCount} 个包含 encrypted_content 的历史会话，不能安全删除。请保留该 provider 用于打开旧会话，或确认不再需要这些历史会话后手动清理。`);
   }
 
   const sync = options?.sync === false

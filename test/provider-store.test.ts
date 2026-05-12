@@ -227,6 +227,84 @@ test("同步会话时只改 rollout 第一行 session_meta", async () => {
   assert.match(lines[1], /"model_provider":"old"/);
 });
 
+test("包含 encrypted_content 的旧会话不会被自动迁移到新 provider", async () => {
+  const home = await tempCodexHome();
+  const sessionDir = path.join(home, "sessions", "2026", "05", "15");
+  const sessionFile = path.join(sessionDir, "encrypted.jsonl");
+  const dbPath = path.join(home, "state_5.sqlite");
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(sessionFile, [
+    JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "thread", model_provider: "old" } }),
+    JSON.stringify({ timestamp: "later", type: "event_msg", payload: { encrypted_content: "rs_012345" } }),
+    "",
+  ].join("\n"), "utf8");
+  const db = await openSqliteDatabase(dbPath);
+  assert.ok(db);
+  db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT)");
+  db.run("INSERT INTO threads (id, model_provider) VALUES (?, ?)", ["thread", "old"]);
+  db.close();
+
+  await addProvider(home, {
+    name: "Any",
+    baseUrl: "https://any.example/v1",
+    apiKey: "sk-any",
+  });
+
+  const result = await switchProvider(home, "Any");
+  assert.equal(result.sync?.changedFiles.length, 0);
+  assert.equal(result.sync?.protectedEncryptedSessions.total, 1);
+  assert.match(result.sync?.warnings.join("\n") ?? "", /encrypted_content/);
+
+  const synced = await fs.readFile(sessionFile, "utf8");
+  assert.match(synced, /"model_provider":"old"/);
+
+  const check = await doctor(home);
+  assert.equal(check.sessionSync?.statusBefore.protectedEncryptedSessions.total, 1);
+  assert.deepEqual(check.problems.filter((problem) => !problem.includes("SQLite")), []);
+});
+
+test("已错误迁移过的 encrypted_content 会话会按备份恢复原 provider", async () => {
+  const home = await tempCodexHome();
+  const sessionDir = path.join(home, "sessions", "2026", "05", "16");
+  const sessionFile = path.join(sessionDir, "encrypted.jsonl");
+  const dbPath = path.join(home, "state_5.sqlite");
+  await fs.mkdir(sessionDir, { recursive: true });
+  const originalContent = [
+    JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "thread", model_provider: "old", cwd: "/tmp/example" } }),
+    JSON.stringify({ timestamp: "later", type: "event_msg", payload: { encrypted_content: "rs_012345" } }),
+    "",
+  ].join("\n");
+  const migratedContent = originalContent.replace('"model_provider":"old"', '"model_provider":"any"');
+  await fs.writeFile(sessionFile, migratedContent, "utf8");
+  await fs.writeFile(`${sessionFile}.bak`, originalContent, "utf8");
+
+  const db = await openSqliteDatabase(dbPath);
+  assert.ok(db);
+  db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT, cwd TEXT)");
+  db.run("INSERT INTO threads (id, model_provider, cwd) VALUES (?, ?, ?)", ["thread", "any", "/tmp/example"]);
+  db.close();
+
+  await addProvider(home, {
+    name: "Any",
+    baseUrl: "https://any.example/v1",
+    apiKey: "sk-any",
+  });
+  await switchProvider(home, "Any", { sync: false });
+
+  const result = await doctor(home);
+  assert.equal(result.sessionSync?.repaired, true);
+  assert.equal(result.sessionSync?.sync?.restoredEncryptedFiles.length, 1);
+  assert.deepEqual(result.problems, []);
+  assert.match(await fs.readFile(sessionFile, "utf8"), /"model_provider":"old"/);
+  await fs.access(`${sessionFile}.bak.encrypted-sync`);
+
+  const verifyDb = await openSqliteDatabase(dbPath, { readOnly: true });
+  assert.ok(verifyDb);
+  const rows = verifyDb.all("SELECT model_provider FROM threads WHERE id = ?", ["thread"]);
+  verifyDb.close();
+  assert.deepEqual(rows, [{ model_provider: "old" }]);
+});
+
 test("Node 20 可通过 WASM fallback 同步 state_5.sqlite", async () => {
   const home = await tempCodexHome();
   const dbPath = path.join(home, "state_5.sqlite");
@@ -325,6 +403,33 @@ test("删除非最后一个提供商时也会清理该 provider 的历史引用"
 
   assert.match(await fs.readFile(tmpFile, "utf8"), /"model_provider":"openai"/);
   assert.match(await fs.readFile(otherFile, "utf8"), /"model_provider":"other"/);
+});
+
+test("仍有 encrypted_content 历史会话时禁止删除对应 provider", async () => {
+  const home = await tempCodexHome();
+  const sessionDir = path.join(home, "sessions", "2026", "05", "17");
+  const sessionFile = path.join(sessionDir, "encrypted.jsonl");
+  const dbPath = path.join(home, "state_5.sqlite");
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(sessionFile, [
+    JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "thread", model_provider: "tmp" } }),
+    JSON.stringify({ timestamp: "later", type: "event_msg", payload: { encrypted_content: "rs_012345" } }),
+    "",
+  ].join("\n"), "utf8");
+  const db = await openSqliteDatabase(dbPath);
+  assert.ok(db);
+  db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT)");
+  db.run("INSERT INTO threads (id, model_provider) VALUES (?, ?)", ["thread", "tmp"]);
+  db.close();
+
+  await addProvider(home, {
+    name: "tmp",
+    baseUrl: "https://tmp.example/v1",
+    apiKey: "sk-tmp",
+  });
+  await switchProvider(home, "tmp", { sync: false });
+
+  await assert.rejects(removeProvider(home, "tmp"), /encrypted_content/);
 });
 
 test("可以在保留自定义提供商时手动切换到默认 OpenAI", async () => {

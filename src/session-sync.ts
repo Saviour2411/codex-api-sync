@@ -12,6 +12,20 @@ type CwdStat = {
   updatedAtMs: number;
 };
 
+type JsonlSessionInfo = {
+  provider?: string;
+  threadId?: string;
+  cwd?: string;
+  hasEncryptedContent: boolean;
+};
+
+type ProtectedEncryptedSession = {
+  file: string;
+  providerId: string;
+  threadId?: string;
+  needsFileRestore: boolean;
+};
+
 async function collectJsonlFiles(dir: string): Promise<string[]> {
   if (!(await pathExists(dir))) {
     return [];
@@ -57,6 +71,16 @@ function incrementCount(counts: ProviderCounts, providerId: string): void {
   counts[providerId] = (counts[providerId] ?? 0) + 1;
 }
 
+function decrementCount(counts: ProviderCounts, providerId: string): void {
+  const next = (counts[providerId] ?? 0) - 1;
+  if (next > 0) {
+    counts[providerId] = next;
+    return;
+  }
+
+  delete counts[providerId];
+}
+
 function splitFirstLine(content: string): { firstLine: string; ending: string; rest: string } {
   const newlineIndex = content.indexOf("\n");
   if (newlineIndex === -1) {
@@ -92,7 +116,30 @@ function syncJsonlContent(content: string, providerId: string, fromProviderId?: 
   };
 }
 
-function readJsonlProvider(content: string): string | undefined {
+function setJsonlProvider(content: string, providerId: string): { content: string; changed: boolean; threadId?: string; cwd?: string } {
+  const { firstLine, ending, rest } = splitFirstLine(content);
+  const parsed = parseSessionMetaLine(firstLine);
+  if (!parsed) {
+    return { content, changed: false };
+  }
+
+  const currentProvider = parsed.payload.model_provider;
+  const threadId = typeof parsed.payload.id === "string" && parsed.payload.id ? parsed.payload.id : undefined;
+  const cwd = typeof parsed.payload.cwd === "string" && parsed.payload.cwd.trim() ? parsed.payload.cwd : undefined;
+  if (currentProvider === providerId) {
+    return { content, changed: false, threadId, cwd };
+  }
+
+  parsed.payload.model_provider = providerId;
+  return {
+    content: `${JSON.stringify(parsed.item)}${ending}${rest}`,
+    changed: true,
+    threadId,
+    cwd,
+  };
+}
+
+function readJsonlInfo(content: string): JsonlSessionInfo | undefined {
   const { firstLine } = splitFirstLine(content);
   const parsed = parseSessionMetaLine(firstLine);
   if (!parsed) {
@@ -100,7 +147,72 @@ function readJsonlProvider(content: string): string | undefined {
   }
 
   const provider = parsed.payload.model_provider;
-  return typeof provider === "string" && provider ? provider : "(missing)";
+  const threadId = typeof parsed.payload.id === "string" && parsed.payload.id ? parsed.payload.id : undefined;
+  const cwd = typeof parsed.payload.cwd === "string" && parsed.payload.cwd.trim() ? parsed.payload.cwd : undefined;
+  return {
+    provider: typeof provider === "string" && provider ? provider : "(missing)",
+    threadId,
+    cwd,
+    hasEncryptedContent: content.includes("encrypted_content"),
+  };
+}
+
+async function readBackupJsonlProvider(filePath: string): Promise<string | undefined> {
+  const backupPath = `${filePath}.bak`;
+  if (!(await pathExists(backupPath))) {
+    return undefined;
+  }
+
+  try {
+    return readJsonlInfo(await fs.readFile(backupPath, "utf8"))?.provider;
+  } catch {
+    return undefined;
+  }
+}
+
+function getProtectedEncryptedSession(
+  file: string,
+  info: JsonlSessionInfo,
+  targetProviderId: string,
+  backupProviderId?: string,
+  protectEncrypted = true
+): ProtectedEncryptedSession | undefined {
+  if (!protectEncrypted || !info.hasEncryptedContent || !info.provider) {
+    return undefined;
+  }
+
+  if (backupProviderId && backupProviderId !== targetProviderId && info.provider === targetProviderId) {
+    return {
+      file,
+      providerId: backupProviderId,
+      threadId: info.threadId,
+      needsFileRestore: true,
+    };
+  }
+
+  if (info.provider !== targetProviderId) {
+    return {
+      file,
+      providerId: info.provider,
+      threadId: info.threadId,
+      needsFileRestore: false,
+    };
+  }
+
+  return undefined;
+}
+
+function summarizeProtectedEncryptedSessions(sessions: ProtectedEncryptedSession[]) {
+  const byProvider: ProviderCounts = {};
+  for (const session of sessions) {
+    incrementCount(byProvider, session.providerId);
+  }
+
+  return {
+    total: sessions.length,
+    byProvider,
+    files: sessions.map((session) => session.file),
+  };
 }
 
 function tableHasColumn(db: SqliteConnection, tableName: string, columnName: string): boolean {
@@ -263,7 +375,11 @@ async function updateSqliteProvider(
   codexHome: string,
   providerId: string,
   warnings: string[],
-  options?: { fromProviderId?: string; threadCwdById?: Map<string, string> }
+  options?: {
+    fromProviderId?: string;
+    threadCwdById?: Map<string, string>;
+    protectedThreadProviderById?: Map<string, string>;
+  }
 ): Promise<{ present: boolean; rowsUpdated: number }> {
   const dbPath = path.join(codexHome, "state_5.sqlite");
   if (!(await pathExists(dbPath))) {
@@ -308,10 +424,20 @@ async function updateSqliteProvider(
         `, [desktopCwd, threadId, desktopCwd]).changes;
       }
     }
+    let protectedRowsUpdated = 0;
+    if (options?.protectedThreadProviderById?.size) {
+      for (const [threadId, protectedProviderId] of options.protectedThreadProviderById) {
+        protectedRowsUpdated += db.run(`
+          UPDATE threads
+          SET model_provider = ?
+          WHERE id = ? AND COALESCE(model_provider, '') <> ?
+        `, [protectedProviderId, threadId, protectedProviderId]).changes;
+      }
+    }
     db.exec("COMMIT");
     transactionOpen = false;
 
-    return { present: true, rowsUpdated: result.changes + cwdRowsUpdated };
+    return { present: true, rowsUpdated: result.changes + cwdRowsUpdated + protectedRowsUpdated };
   } catch (error) {
     if (transactionOpen) {
       try {
@@ -367,6 +493,49 @@ async function readSqliteProviderCounts(codexHome: string, warnings: string[]): 
   } catch (error) {
     warnings.push(`读取 state_5.sqlite provider 分布失败：${error instanceof Error ? error.message : String(error)}`);
     return {};
+  } finally {
+    db?.close();
+  }
+}
+
+async function readSqliteProvidersByThreadId(codexHome: string, threadIds: string[], warnings: string[]): Promise<Map<string, string>> {
+  const providers = new Map<string, string>();
+  const uniqueThreadIds = [...new Set(threadIds)].filter(Boolean);
+  if (uniqueThreadIds.length === 0) {
+    return providers;
+  }
+
+  const dbPath = path.join(codexHome, "state_5.sqlite");
+  if (!(await pathExists(dbPath))) {
+    return providers;
+  }
+
+  let db: SqliteConnection | undefined;
+  try {
+    db = await openSqliteDatabase(dbPath, { readOnly: true });
+    if (!db || !tableHasColumn(db, "threads", "model_provider")) {
+      return providers;
+    }
+
+    for (const threadId of uniqueThreadIds) {
+      const rows = db.all(`
+        SELECT id,
+          CASE
+            WHEN model_provider IS NULL OR model_provider = '' THEN '(missing)'
+            ELSE model_provider
+          END AS model_provider
+        FROM threads
+        WHERE id = ?
+      `, [threadId]);
+      const row = rows[0];
+      if (typeof row?.id === "string" && typeof row.model_provider === "string") {
+        providers.set(row.id, row.model_provider);
+      }
+    }
+    return providers;
+  } catch (error) {
+    warnings.push(`读取 state_5.sqlite 加密会话 provider 失败：${error instanceof Error ? error.message : String(error)}`);
+    return providers;
   } finally {
     db?.close();
   }
@@ -446,10 +615,14 @@ async function syncGlobalState(codexHome: string, cwdStats: CwdStat[], warnings:
   return true;
 }
 
-export async function syncSessions(codexHome: string, providerId?: string, options?: { fromProviderId?: string }): Promise<SyncResult> {
+export async function syncSessions(codexHome: string, providerId?: string, options?: { fromProviderId?: string; protectEncrypted?: boolean }): Promise<SyncResult> {
   const warnings: string[] = [];
   const changedFiles: string[] = [];
+  const restoredEncryptedFiles: string[] = [];
   const threadCwdById = new Map<string, string>();
+  const protectedThreadProviderById = new Map<string, string>();
+  const protectedEncryptedSessions: ProtectedEncryptedSession[] = [];
+  const protectEncrypted = options?.protectEncrypted !== false;
   const targetProviderId = providerId ?? (await readCodexConfig(codexHome)).activeProviderId;
 
   if (!targetProviderId) {
@@ -474,6 +647,32 @@ export async function syncSessions(codexHome: string, providerId?: string, optio
       continue;
     }
 
+    const info = readJsonlInfo(content);
+    if (!info) {
+      continue;
+    }
+
+    const backupProvider = await readBackupJsonlProvider(file);
+    const protectedSession = getProtectedEncryptedSession(file, info, targetProviderId, backupProvider, protectEncrypted);
+    if (protectedSession) {
+      protectedEncryptedSessions.push(protectedSession);
+      if (protectedSession.threadId) {
+        protectedThreadProviderById.set(protectedSession.threadId, protectedSession.providerId);
+      }
+      if (info.threadId && info.cwd) {
+        threadCwdById.set(info.threadId, info.cwd);
+      }
+      if (protectedSession.needsFileRestore) {
+        const restored = setJsonlProvider(content, protectedSession.providerId);
+        if (restored.changed) {
+          await fs.copyFile(file, `${file}.bak.encrypted-sync`);
+          await fs.writeFile(file, restored.content, "utf8");
+          restoredEncryptedFiles.push(file);
+        }
+      }
+      continue;
+    }
+
     const synced = syncJsonlContent(content, targetProviderId, options?.fromProviderId);
     if (synced.threadId && synced.cwd) {
       threadCwdById.set(synced.threadId, synced.cwd);
@@ -493,6 +692,7 @@ export async function syncSessions(codexHome: string, providerId?: string, optio
     const sqliteResult = await updateSqliteProvider(codexHome, targetProviderId, warnings, {
       fromProviderId: options?.fromProviderId,
       threadCwdById,
+      protectedThreadProviderById,
     });
     sqliteRowsUpdated = sqliteResult.rowsUpdated;
     sqlitePresent = sqliteResult.present;
@@ -505,7 +705,19 @@ export async function syncSessions(codexHome: string, providerId?: string, optio
     globalStateUpdated = await syncGlobalState(codexHome, cwdStats, warnings);
   }
 
-  return { changedFiles, sqliteRowsUpdated, sqlitePresent, globalStateUpdated, warnings };
+  if (protectedEncryptedSessions.length > 0) {
+    warnings.push(`检测到 ${protectedEncryptedSessions.length} 个包含 encrypted_content 的历史会话，已保留其原 provider，避免跨供应商继续会话时报 invalid_encrypted_content。`);
+  }
+
+  return {
+    changedFiles,
+    restoredEncryptedFiles,
+    protectedEncryptedSessions: summarizeProtectedEncryptedSessions(protectedEncryptedSessions),
+    sqliteRowsUpdated,
+    sqlitePresent,
+    globalStateUpdated,
+    warnings,
+  };
 }
 
 export async function inspectSessionSyncStatus(codexHome: string, providerId?: string): Promise<SessionSyncStatus> {
@@ -518,13 +730,26 @@ export async function inspectSessionSyncStatus(codexHome: string, providerId?: s
     ...(await collectJsonlFiles(archivedDir)),
   ];
   const sessionCounts: ProviderCounts = {};
+  const protectedEncryptedSessions: ProtectedEncryptedSession[] = [];
 
   for (const file of sessionFiles) {
     const content = await fs.readFile(file, "utf8");
-    const provider = readJsonlProvider(content);
-    if (provider) {
-      incrementCount(sessionCounts, provider);
+    const info = readJsonlInfo(content);
+    if (!info?.provider) {
+      continue;
     }
+
+    let countedProvider = info.provider;
+    const backupProvider = await readBackupJsonlProvider(file);
+    if (targetProviderId) {
+      const protectedSession = getProtectedEncryptedSession(file, info, targetProviderId, backupProvider);
+      if (protectedSession) {
+        protectedEncryptedSessions.push(protectedSession);
+        countedProvider = protectedSession.providerId;
+      }
+    }
+
+    incrementCount(sessionCounts, countedProvider);
   }
 
   if (sessionFiles.length === 0) {
@@ -532,13 +757,48 @@ export async function inspectSessionSyncStatus(codexHome: string, providerId?: s
   }
 
   const sqliteCounts = await readSqliteProviderCounts(codexHome, warnings);
-  const mismatchedSessionProviders = Object.keys(sessionCounts).filter((provider) => provider !== targetProviderId);
-  const mismatchedSqliteProviders = Object.keys(sqliteCounts).filter((provider) => provider !== targetProviderId);
+  const protectedSessionCounts: ProviderCounts = {};
+  for (const session of protectedEncryptedSessions) {
+    incrementCount(protectedSessionCounts, session.providerId);
+  }
+  const unprotectedSessionCounts = { ...sessionCounts };
+  for (const [provider, count] of Object.entries(protectedSessionCounts)) {
+    for (let index = 0; index < count; index += 1) {
+      decrementCount(unprotectedSessionCounts, provider);
+    }
+  }
+  const protectedThreadIds = protectedEncryptedSessions
+    .map((session) => session.threadId)
+    .filter((threadId): threadId is string => Boolean(threadId));
+  const sqliteProviderByThreadId = await readSqliteProvidersByThreadId(codexHome, protectedThreadIds, warnings);
+  const protectedSqliteCounts: ProviderCounts = {};
+  for (const provider of sqliteProviderByThreadId.values()) {
+    incrementCount(protectedSqliteCounts, provider);
+  }
+  const effectiveSqliteCounts = { ...sqliteCounts };
+  for (const [provider, count] of Object.entries(protectedSqliteCounts)) {
+    for (let index = 0; index < count; index += 1) {
+      decrementCount(effectiveSqliteCounts, provider);
+    }
+  }
+  const mismatchedSessionProviders = Object.keys(unprotectedSessionCounts).filter((provider) => provider !== targetProviderId);
+  const unprotectedSqliteMismatches = Object.keys(effectiveSqliteCounts).filter((provider) => provider !== targetProviderId);
+  const protectedSqliteMismatches = protectedEncryptedSessions.some((session) => (
+    session.threadId &&
+    sqliteProviderByThreadId.has(session.threadId) &&
+    sqliteProviderByThreadId.get(session.threadId) !== session.providerId
+  ));
 
   return {
     targetProviderId,
-    needsSync: Boolean(targetProviderId) && (mismatchedSessionProviders.length > 0 || mismatchedSqliteProviders.length > 0),
+    needsSync: Boolean(targetProviderId) && (
+      mismatchedSessionProviders.length > 0 ||
+      unprotectedSqliteMismatches.length > 0 ||
+      protectedEncryptedSessions.some((session) => session.needsFileRestore) ||
+      protectedSqliteMismatches
+    ),
     sessionFiles: sessionCounts,
+    protectedEncryptedSessions: summarizeProtectedEncryptedSessions(protectedEncryptedSessions),
     sqlite: sqliteCounts,
     warnings,
   };
@@ -561,7 +821,7 @@ export async function ensureSessionsSynced(codexHome: string, providerId?: strin
     statusBefore,
     statusAfter,
     sync,
-    repaired: sync.changedFiles.length > 0 || sync.sqliteRowsUpdated > 0 || sync.globalStateUpdated,
+    repaired: sync.changedFiles.length > 0 || sync.restoredEncryptedFiles.length > 0 || sync.sqliteRowsUpdated > 0 || sync.globalStateUpdated,
     warnings: [...warnings, ...sync.warnings, ...statusAfter.warnings],
   };
 }

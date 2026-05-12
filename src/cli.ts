@@ -83,6 +83,20 @@ function formatCounts(counts: Record<string, number>): string {
     .join(", ") || "无";
 }
 
+function printSyncWarnings(result: { warnings: string[]; protectedEncryptedSessions?: { total: number; byProvider: Record<string, number> } }): void {
+  const seen = new Set<string>();
+  for (const warning of result.warnings) {
+    if (seen.has(warning)) {
+      continue;
+    }
+    seen.add(warning);
+    console.warn(`警告：${warning}`);
+  }
+  if (result.protectedEncryptedSessions?.total) {
+    console.warn(`加密历史会话保护: ${result.protectedEncryptedSessions.total} 个，原 provider 分布：${formatCounts(result.protectedEncryptedSessions.byProvider)}`);
+  }
+}
+
 async function runStartupRepair(codexHome: string): Promise<void> {
   const result = await ensureActiveProviderSessions(codexHome);
   if (result.repaired) {
@@ -142,6 +156,10 @@ async function main(): Promise<void> {
         console.log(`会话文件 provider 分布: ${formatCounts(result.sessionSync.statusAfter?.sessionFiles ?? result.sessionSync.statusBefore.sessionFiles)}`);
         console.log(`SQLite provider 分布: ${formatCounts(result.sessionSync.statusAfter?.sqlite ?? result.sessionSync.statusBefore.sqlite)}`);
         console.log(`会话同步状态: ${result.sessionSync.statusAfter?.needsSync ?? result.sessionSync.statusBefore.needsSync ? "仍需同步" : "正常"}`);
+        const protectedEncrypted = result.sessionSync.statusAfter?.protectedEncryptedSessions ?? result.sessionSync.statusBefore.protectedEncryptedSessions;
+        if (protectedEncrypted.total > 0) {
+          console.log(`加密历史会话保护: ${protectedEncrypted.total} 个，原 provider 分布：${formatCounts(protectedEncrypted.byProvider)}`);
+        }
       }
       for (const problem of result.problems) {
         console.error(`问题：${problem}`);
@@ -183,8 +201,8 @@ async function main(): Promise<void> {
         sync: flags["no-sync"] !== true,
       });
       console.log(result.restoredDefault ? "已删除提供商，并恢复官方 OpenAI 默认配置。" : "已删除提供商。");
-      for (const warning of result.sync?.warnings ?? []) {
-        console.warn(`警告：${warning}`);
+      if (result.sync) {
+        printSyncWarnings(result.sync);
       }
       return;
     }
@@ -199,6 +217,9 @@ async function main(): Promise<void> {
       for (const warning of result.warnings) {
         console.warn(`警告：${warning}`);
       }
+      if (result.sync) {
+        printSyncWarnings(result.sync);
+      }
       return;
     }
 
@@ -212,16 +233,17 @@ async function main(): Promise<void> {
       for (const warning of result.warnings) {
         console.warn(`警告：${warning}`);
       }
+      if (result.sync) {
+        printSyncWarnings(result.sync);
+      }
       return;
     }
 
     case "sync": {
       await runStartupRepair(codexHome);
       const result = await syncSessions(codexHome);
-      console.log(`会话同步完成。变更文件数：${result.changedFiles.length}，SQLite 更新行数：${result.sqliteRowsUpdated}，项目缓存：${result.globalStateUpdated ? "已更新" : "未变更"}。`);
-      for (const warning of result.warnings) {
-        console.warn(`警告：${warning}`);
-      }
+      console.log(`会话同步完成。变更文件数：${result.changedFiles.length}，加密会话恢复数：${result.restoredEncryptedFiles.length}，SQLite 更新行数：${result.sqliteRowsUpdated}，项目缓存：${result.globalStateUpdated ? "已更新" : "未变更"}。`);
+      printSyncWarnings(result);
       return;
     }
 

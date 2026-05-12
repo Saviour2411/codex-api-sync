@@ -24,20 +24,29 @@ export type ProviderUpdate = {
   model?: string;
 };
 
+export type ProviderCounts = Record<string, number>;
+
+export type EncryptedSessionSummary = {
+  total: number;
+  byProvider: ProviderCounts;
+  files: string[];
+};
+
 export type SyncResult = {
   changedFiles: string[];
+  restoredEncryptedFiles: string[];
+  protectedEncryptedSessions: EncryptedSessionSummary;
   sqliteRowsUpdated: number;
   sqlitePresent: boolean;
   globalStateUpdated: boolean;
   warnings: string[];
 };
 
-export type ProviderCounts = Record<string, number>;
-
 export type SessionSyncStatus = {
   targetProviderId?: string;
   needsSync: boolean;
   sessionFiles: ProviderCounts;
+  protectedEncryptedSessions: EncryptedSessionSummary;
   sqlite: ProviderCounts;
   warnings: string[];
 };

@@ -76,4 +76,6 @@ codex-api-sync sync
 
 工具启动 Web、执行 `list`、`doctor`、`sync`、`switch`、`switch-default`、`remove` 时，会先检查当前 active provider 与历史会话 provider 元数据是否一致；如果当前已启用第三方 provider 但历史里仍残留 `openai` 或旧 provider，会自动同步到当前 provider。
 
+历史会话里如果包含 `encrypted_content`，通常表示这段上下文由原 provider 或原账号加密生成，不能安全迁移到新的 provider。工具会检测这类会话并保留其原 `model_provider`；如果之前已经被旧版本工具错误同步过，且同目录存在 `.bak` 备份，工具会尽量按备份恢复原 provider，避免继续旧会话时报 `invalid_encrypted_content`。这类旧会话需要切回原 provider/账号继续，或者新开会话。
+
 SQLite 同步会优先使用 Node.js 内置 `node:sqlite`；在 Node 20 等没有内置 SQLite 的环境下，会自动使用 `node-sqlite3-wasm` 后备实现，不需要系统安装 `sqlite3` 命令或原生编译工具。
