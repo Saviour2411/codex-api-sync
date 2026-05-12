@@ -57,8 +57,8 @@ async function load() {
 
 function renderProviders(providers) {
   providersEl.innerHTML = "";
+  providersEl.classList.toggle("is-empty", providers.length === 0);
   if (providers.length === 0) {
-    providersEl.textContent = "还没有配置自定义提供商。";
     return;
   }
 
@@ -82,7 +82,7 @@ function renderProviders(providers) {
 
     row.querySelector(".provider-name").textContent = provider.name;
     row.querySelector(".provider-url").textContent = provider.baseUrl;
-    row.querySelector(".provider-meta").textContent = `${provider.id} · key:${provider.hasApiKey ? "有" : "无"}`;
+    row.querySelector(".provider-meta").textContent = `${provider.isActive ? "当前 · " : ""}${provider.id} · key:${provider.hasApiKey ? "有" : "无"}`;
 
     row.querySelector('[data-action="switch"]').addEventListener("click", async () => {
       try {
@@ -105,6 +105,9 @@ function renderProviders(providers) {
     });
 
     row.querySelector('[data-action="remove"]').addEventListener("click", async () => {
+      if (!confirm(`删除提供商「${provider.name}」？`)) {
+        return;
+      }
       try {
         showMessage(await api(`/api/providers/${encodeURIComponent(provider.name)}`, { method: "DELETE" }));
         await load();

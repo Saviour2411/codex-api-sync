@@ -7,51 +7,71 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <main class="shell">
+    <a class="skip-link" href="#main">跳到主内容</a>
+    <main id="main" class="shell">
       <header class="topbar">
-        <div>
-          <h1>Codex 提供商同步</h1>
-          <p id="status">加载中...</p>
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">C</div>
+          <div class="brand-copy">
+            <p class="eyebrow">Provider Console</p>
+            <h1>Codex 提供商同步</h1>
+            <p id="status" aria-live="polite">加载中…</p>
+          </div>
         </div>
-        <div class="actions">
-          <button id="doctorButton" type="button">检查</button>
-          <button id="defaultButton" type="button">默认 OpenAI</button>
-          <button id="syncButton" type="button">同步</button>
+        <div class="actions top-actions" aria-label="全局操作">
+          <button id="doctorButton" class="button secondary" type="button">
+            <span aria-hidden="true">◎</span>
+            检查
+          </button>
+          <button id="defaultButton" class="button secondary" type="button">
+            <span aria-hidden="true">↺</span>
+            默认 OpenAI
+          </button>
+          <button id="syncButton" class="button primary" type="button">
+            <span aria-hidden="true">⇄</span>
+            同步
+          </button>
         </div>
       </header>
 
       <section class="layout">
         <form id="providerForm" class="panel">
-          <h2>添加或更新</h2>
+          <div class="panel-heading">
+            <p class="eyebrow">Config</p>
+            <h2>添加或更新</h2>
+          </div>
           <label>
             名称
-            <input name="name" autocomplete="off" required>
+            <input name="name" autocomplete="off" placeholder="例如 any-router…" spellcheck="false" required>
           </label>
           <label>
             Base URL
-            <input name="baseUrl" type="url" required>
+            <input name="baseUrl" type="url" autocomplete="off" placeholder="https://api.example.com/v1…" spellcheck="false" required>
           </label>
           <label>
             API Key
-            <input name="apiKey" type="password" autocomplete="off">
+            <input name="apiKey" type="password" autocomplete="off" placeholder="sk-…">
           </label>
           <label>
             模型
-            <input name="model" autocomplete="off">
+            <input name="model" autocomplete="off" placeholder="gpt-5.5…" spellcheck="false">
           </label>
           <div class="actions">
-            <button type="submit">保存</button>
-            <button id="clearButton" type="button">清空</button>
+            <button class="button primary" type="submit">保存配置</button>
+            <button id="clearButton" class="button secondary" type="button">清空</button>
           </div>
         </form>
 
-        <section class="panel">
-          <h2>提供商</h2>
+        <section class="panel provider-panel">
+          <div class="panel-heading">
+            <p class="eyebrow">Routes</p>
+            <h2>提供商</h2>
+          </div>
           <div id="providers" class="providers"></div>
         </section>
       </section>
 
-      <pre id="message" class="message" hidden></pre>
+      <pre id="message" class="message" aria-live="polite" hidden></pre>
     </main>
     <script src="/app.js" type="module"></script>
   </body>
