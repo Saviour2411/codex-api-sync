@@ -62,7 +62,7 @@ function requiredFlag(flags: Record<string, string | boolean>, key: string): str
 }
 
 function printHelp(): void {
-  console.log(`codex-api-sync
+  console.log(`Codex Provider Manager
 
 用法：
   codex-api-sync web [--host 127.0.0.1] [--port 14567] [--codex-home <path>]

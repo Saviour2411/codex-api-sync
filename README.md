@@ -1,6 +1,6 @@
-# codex-api-sync
+# Codex Provider Manager
 
-用于切换 Codex Responses API 提供商的本地 Web 和 CLI 工具，修改配置时会保留无关的 Codex 配置项。
+用于管理和切换 Codex Responses API 提供商的本地 Web 和 CLI 工具，修改配置时会保留无关的 Codex 配置项。
 
 工具会把每个提供商的 API key 写入对应 `[model_providers.<id>]` 的
 `experimental_bearer_token` 字段，并在 provider 块里显式写入
