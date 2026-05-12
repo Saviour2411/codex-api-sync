@@ -9,18 +9,44 @@
 
 官方文档把 `experimental_bearer_token` 标为实验字段；这里采用它是因为实测兼容性更好，且可以避免修改全局 `auth.json`。
 
-## 使用
+## 一键安装
+
+需要 Node.js 20 或更高版本。
 
 ```sh
-npm install
-npm run build
-node dist/cli.js list
-node dist/cli.js add --name any --base-url https://example.com/v1 --api-key sk-...
-node dist/cli.js switch --name any
-node dist/cli.js web
+curl -fsSL https://raw.githubusercontent.com/Saviour2411/codex-api-sync/main/install.sh | bash
+```
+
+安装完成后运行：
+
+```sh
+codex-api-sync web
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:14567
 ```
 
 默认使用 `$CODEX_HOME` 指向的目录；未设置时使用 `~/.codex`。
+
+## 手动安装
+
+```sh
+git clone https://github.com/Saviour2411/codex-api-sync.git
+cd codex-api-sync
+npm install
+npm run build
+npm link
+codex-api-sync web
+```
+
+不想链接全局命令时，也可以直接运行：
+
+```sh
+node dist/cli.js web
+```
 
 ## 命令
 
