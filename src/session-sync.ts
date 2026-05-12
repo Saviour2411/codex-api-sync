@@ -23,7 +23,6 @@ type ProtectedEncryptedSession = {
   file: string;
   providerId: string;
   threadId?: string;
-  needsFileRestore: boolean;
 };
 
 async function collectJsonlFiles(dir: string): Promise<string[]> {
@@ -157,8 +156,8 @@ function readJsonlInfo(content: string): JsonlSessionInfo | undefined {
   };
 }
 
-async function readBackupJsonlProvider(filePath: string): Promise<string | undefined> {
-  const backupPath = `${filePath}.bak`;
+async function readEncryptedSyncBackupJsonlProvider(filePath: string): Promise<string | undefined> {
+  const backupPath = `${filePath}.bak.encrypted-sync`;
   if (!(await pathExists(backupPath))) {
     return undefined;
   }
@@ -174,20 +173,10 @@ function getProtectedEncryptedSession(
   file: string,
   info: JsonlSessionInfo,
   targetProviderId: string,
-  backupProviderId?: string,
   protectEncrypted = true
 ): ProtectedEncryptedSession | undefined {
   if (!protectEncrypted || !info.hasEncryptedContent || !info.provider) {
     return undefined;
-  }
-
-  if (backupProviderId && backupProviderId !== targetProviderId && info.provider === targetProviderId) {
-    return {
-      file,
-      providerId: backupProviderId,
-      threadId: info.threadId,
-      needsFileRestore: true,
-    };
   }
 
   if (info.provider !== targetProviderId) {
@@ -195,11 +184,18 @@ function getProtectedEncryptedSession(
       file,
       providerId: info.provider,
       threadId: info.threadId,
-      needsFileRestore: false,
     };
   }
 
   return undefined;
+}
+
+async function isRecoverableUnsafeEncryptedRestore(file: string, info: JsonlSessionInfo, targetProviderId: string): Promise<boolean> {
+  if (!info.hasEncryptedContent || !info.provider || info.provider === targetProviderId) {
+    return false;
+  }
+
+  return await readEncryptedSyncBackupJsonlProvider(file) === targetProviderId;
 }
 
 function summarizeProtectedEncryptedSessions(sessions: ProtectedEncryptedSession[]) {
@@ -652,8 +648,20 @@ export async function syncSessions(codexHome: string, providerId?: string, optio
       continue;
     }
 
-    const backupProvider = await readBackupJsonlProvider(file);
-    const protectedSession = getProtectedEncryptedSession(file, info, targetProviderId, backupProvider, protectEncrypted);
+    if (await isRecoverableUnsafeEncryptedRestore(file, info, targetProviderId)) {
+      const restored = setJsonlProvider(content, targetProviderId);
+      if (restored.threadId && restored.cwd) {
+        threadCwdById.set(restored.threadId, restored.cwd);
+      }
+      if (restored.changed) {
+        await fs.copyFile(file, `${file}.bak.restore-current`);
+        await fs.writeFile(file, restored.content, "utf8");
+        restoredEncryptedFiles.push(file);
+      }
+      continue;
+    }
+
+    const protectedSession = getProtectedEncryptedSession(file, info, targetProviderId, protectEncrypted);
     if (protectedSession) {
       protectedEncryptedSessions.push(protectedSession);
       if (protectedSession.threadId) {
@@ -661,14 +669,6 @@ export async function syncSessions(codexHome: string, providerId?: string, optio
       }
       if (info.threadId && info.cwd) {
         threadCwdById.set(info.threadId, info.cwd);
-      }
-      if (protectedSession.needsFileRestore) {
-        const restored = setJsonlProvider(content, protectedSession.providerId);
-        if (restored.changed) {
-          await fs.copyFile(file, `${file}.bak.encrypted-sync`);
-          await fs.writeFile(file, restored.content, "utf8");
-          restoredEncryptedFiles.push(file);
-        }
       }
       continue;
     }
@@ -740,9 +740,14 @@ export async function inspectSessionSyncStatus(codexHome: string, providerId?: s
     }
 
     let countedProvider = info.provider;
-    const backupProvider = await readBackupJsonlProvider(file);
     if (targetProviderId) {
-      const protectedSession = getProtectedEncryptedSession(file, info, targetProviderId, backupProvider);
+      if (await isRecoverableUnsafeEncryptedRestore(file, info, targetProviderId)) {
+        countedProvider = targetProviderId;
+        incrementCount(sessionCounts, countedProvider);
+        continue;
+      }
+
+      const protectedSession = getProtectedEncryptedSession(file, info, targetProviderId);
       if (protectedSession) {
         protectedEncryptedSessions.push(protectedSession);
         countedProvider = protectedSession.providerId;
@@ -794,7 +799,6 @@ export async function inspectSessionSyncStatus(codexHome: string, providerId?: s
     needsSync: Boolean(targetProviderId) && (
       mismatchedSessionProviders.length > 0 ||
       unprotectedSqliteMismatches.length > 0 ||
-      protectedEncryptedSessions.some((session) => session.needsFileRestore) ||
       protectedSqliteMismatches
     ),
     sessionFiles: sessionCounts,

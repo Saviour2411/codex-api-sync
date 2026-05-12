@@ -263,7 +263,7 @@ test("包含 encrypted_content 的旧会话不会被自动迁移到新 provider"
   assert.deepEqual(check.problems.filter((problem) => !problem.includes("SQLite")), []);
 });
 
-test("已错误迁移过的 encrypted_content 会话会按备份恢复原 provider", async () => {
+test("encrypted_content 会话存在普通 .bak 时不会回滚当前 provider", async () => {
   const home = await tempCodexHome();
   const sessionDir = path.join(home, "sessions", "2026", "05", "16");
   const sessionFile = path.join(sessionDir, "encrypted.jsonl");
@@ -292,17 +292,59 @@ test("已错误迁移过的 encrypted_content 会话会按备份恢复原 provid
   await switchProvider(home, "Any", { sync: false });
 
   const result = await doctor(home);
-  assert.equal(result.sessionSync?.repaired, true);
-  assert.equal(result.sessionSync?.sync?.restoredEncryptedFiles.length, 1);
+  assert.equal(result.sessionSync?.repaired, false);
+  assert.equal(result.sessionSync?.statusBefore.protectedEncryptedSessions.total, 0);
+  assert.equal(result.sessionSync?.statusBefore.needsSync, false);
   assert.deepEqual(result.problems, []);
-  assert.match(await fs.readFile(sessionFile, "utf8"), /"model_provider":"old"/);
-  await fs.access(`${sessionFile}.bak.encrypted-sync`);
+  assert.match(await fs.readFile(sessionFile, "utf8"), /"model_provider":"any"/);
 
   const verifyDb = await openSqliteDatabase(dbPath, { readOnly: true });
   assert.ok(verifyDb);
   const rows = verifyDb.all("SELECT model_provider FROM threads WHERE id = ?", ["thread"]);
   verifyDb.close();
-  assert.deepEqual(rows, [{ model_provider: "old" }]);
+  assert.deepEqual(rows, [{ model_provider: "any" }]);
+});
+
+test("上一版错误回滚的 encrypted_content 会话会恢复到当前 provider", async () => {
+  const home = await tempCodexHome();
+  const sessionDir = path.join(home, "sessions", "2026", "05", "18");
+  const sessionFile = path.join(sessionDir, "encrypted.jsonl");
+  const dbPath = path.join(home, "state_5.sqlite");
+  await fs.mkdir(sessionDir, { recursive: true });
+  const currentProviderContent = [
+    JSON.stringify({ timestamp: "now", type: "session_meta", payload: { id: "thread", model_provider: "any", cwd: "/tmp/example" } }),
+    JSON.stringify({ timestamp: "later", type: "event_msg", payload: { encrypted_content: "rs_012345" } }),
+    "",
+  ].join("\n");
+  const wronglyRestoredContent = currentProviderContent.replace('"model_provider":"any"', '"model_provider":"old"');
+  await fs.writeFile(sessionFile, wronglyRestoredContent, "utf8");
+  await fs.writeFile(`${sessionFile}.bak.encrypted-sync`, currentProviderContent, "utf8");
+
+  const db = await openSqliteDatabase(dbPath);
+  assert.ok(db);
+  db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT, cwd TEXT)");
+  db.run("INSERT INTO threads (id, model_provider, cwd) VALUES (?, ?, ?)", ["thread", "old", "/tmp/example"]);
+  db.close();
+
+  await addProvider(home, {
+    name: "Any",
+    baseUrl: "https://any.example/v1",
+    apiKey: "sk-any",
+  });
+  await switchProvider(home, "Any", { sync: false });
+
+  const result = await doctor(home);
+  assert.equal(result.sessionSync?.repaired, true);
+  assert.equal(result.sessionSync?.sync?.restoredEncryptedFiles.length, 1);
+  assert.deepEqual(result.problems, []);
+  assert.match(await fs.readFile(sessionFile, "utf8"), /"model_provider":"any"/);
+  await fs.access(`${sessionFile}.bak.restore-current`);
+
+  const verifyDb = await openSqliteDatabase(dbPath, { readOnly: true });
+  assert.ok(verifyDb);
+  const rows = verifyDb.all("SELECT model_provider FROM threads WHERE id = ?", ["thread"]);
+  verifyDb.close();
+  assert.deepEqual(rows, [{ model_provider: "any" }]);
 });
 
 test("Node 20 可通过 WASM fallback 同步 state_5.sqlite", async () => {
